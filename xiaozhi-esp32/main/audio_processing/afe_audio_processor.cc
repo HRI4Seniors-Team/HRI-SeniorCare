@@ -3,14 +3,14 @@
 
 #define PROCESSOR_RUNNING 0x01
 
-static const char* TAG = "AfeAudioProcessor";
+#define TAG "AfeAudioProcessor"
 
 AfeAudioProcessor::AfeAudioProcessor()
     : afe_data_(nullptr) {
     event_group_ = xEventGroupCreate();
 }
 
-void AfeAudioProcessor::Initialize(AudioCodec* codec, bool realtime_chat) {
+void AfeAudioProcessor::Initialize(AudioCodec* codec) {
     codec_ = codec;
     int ref_num = codec_->input_reference() ? 1 : 0;
 
@@ -24,28 +24,36 @@ void AfeAudioProcessor::Initialize(AudioCodec* codec, bool realtime_chat) {
 
     srmodel_list_t *models = esp_srmodel_init("model");
     char* ns_model_name = esp_srmodel_filter(models, ESP_NSNET_PREFIX, NULL);
-
+    char* vad_model_name = esp_srmodel_filter(models, ESP_VADN_PREFIX, NULL);
+    
     afe_config_t* afe_config = afe_config_init(input_format.c_str(), NULL, AFE_TYPE_VC, AFE_MODE_HIGH_PERF);
-    if (realtime_chat) {
-        afe_config->aec_init = true;
-        afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
-    } else {
-        afe_config->aec_init = false;
+    afe_config->aec_mode = AEC_MODE_VOIP_HIGH_PERF;
+    afe_config->vad_mode = VAD_MODE_0;
+    afe_config->vad_min_noise_ms = 100;
+    if (vad_model_name != nullptr) {
+        afe_config->vad_model_name = vad_model_name;
     }
-    afe_config->ns_init = true;
-    afe_config->ns_model_name = ns_model_name;
-    afe_config->afe_ns_mode = AFE_NS_MODE_NET;
-    if (realtime_chat) {
-        afe_config->vad_init = false;
+
+    if (ns_model_name != nullptr) {
+        afe_config->ns_init = true;
+        afe_config->ns_model_name = ns_model_name;
+        afe_config->afe_ns_mode = AFE_NS_MODE_NET;
     } else {
-        afe_config->vad_init = true;
-        afe_config->vad_mode = VAD_MODE_0;
-        afe_config->vad_min_noise_ms = 100;
+        afe_config->ns_init = false;
     }
+
     afe_config->afe_perferred_core = 1;
     afe_config->afe_perferred_priority = 1;
     afe_config->agc_init = false;
     afe_config->memory_alloc_mode = AFE_MEMORY_ALLOC_MORE_PSRAM;
+
+#ifdef CONFIG_USE_DEVICE_AEC
+    afe_config->aec_init = true;
+    afe_config->vad_init = false;
+#else
+    afe_config->aec_init = false;
+    afe_config->vad_init = true;
+#endif
 
     afe_iface_ = esp_afe_handle_from_config(afe_config);
     afe_data_ = afe_iface_->create_from_config(afe_config);
@@ -136,4 +144,18 @@ void AfeAudioProcessor::AudioProcessorTask() {
             output_callback_(std::vector<int16_t>(res->data, res->data + res->data_size / sizeof(int16_t)));
         }
     }
-} 
+}
+
+void AfeAudioProcessor::EnableDeviceAec(bool enable) {
+    if (enable) {
+#if CONFIG_USE_DEVICE_AEC
+        afe_iface_->disable_vad(afe_data_);
+        afe_iface_->enable_aec(afe_data_);
+#else
+        ESP_LOGE(TAG, "Device AEC is not supported");
+#endif
+    } else {
+        afe_iface_->disable_aec(afe_data_);
+        afe_iface_->enable_vad(afe_data_);
+    }
+}

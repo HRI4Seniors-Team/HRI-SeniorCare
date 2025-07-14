@@ -18,7 +18,7 @@ public:
     AfeAudioProcessor();
     ~AfeAudioProcessor();
 
-    void Initialize(AudioCodec* codec, bool realtime_chat) override;
+    void Initialize(AudioCodec* codec) override;
     void Feed(const std::vector<int16_t>& data) override;
     void Start() override;
     void Stop() override;
@@ -26,6 +26,7 @@ public:
     void OnOutput(std::function<void(std::vector<int16_t>&& data)> callback) override;
     void OnVadStateChange(std::function<void(bool speaking)> callback) override;
     size_t GetFeedSize() override;
+    void EnableDeviceAec(bool enable) override;
 
 private:
     EventGroupHandle_t event_group_ = nullptr;

@@ -10,6 +10,7 @@
 #include "led/single_led.h"
 #include "iot/thing_manager.h"
 #include "power_save_timer.h"
+#include "sscma_camera.h"
 
 #include <esp_log.h>
 #include "esp_check.h"
@@ -95,7 +96,9 @@ private:
     esp_lcd_panel_io_handle_t panel_io_ = nullptr;
     esp_lcd_panel_handle_t panel_ = nullptr;
     uint32_t long_press_cnt_;
+    button_driver_t* btn_driver_ = nullptr;
     static SensecapWatcher* instance_;
+    SscmaCamera* camera_ = nullptr;
 
     void InitializePowerSaveTimer() {
         power_save_timer_ = new PowerSaveTimer(-1, 60, 300);
@@ -230,11 +233,6 @@ private:
         ESP_LOGI(TAG, "Knob initialized with pins A:%d B:%d", BSP_KNOB_A_PIN, BSP_KNOB_B_PIN);
     }
 
-    // 添加一个静态成员实例指针，用于按钮回调
-    static uint8_t GetKnobButtonLevel(button_driver_t *button_driver) {
-        return instance_->IoExpanderGetLevel(BSP_KNOB_BTN);
-    }
-
     void InitializeButton() {
         // 设置静态实例指针
         instance_ = this;
@@ -249,12 +247,13 @@ private:
             .long_press_time = 2000,
             .short_press_time = 0
         };
-        button_driver_t btn_driver = {
-            .enable_power_save = false,
-            .get_key_level = GetKnobButtonLevel
+        btn_driver_ = (button_driver_t*)calloc(1, sizeof(button_driver_t));
+        btn_driver_->enable_power_save = false;
+        btn_driver_->get_key_level = [](button_driver_t *button_driver) -> uint8_t {
+            return !instance_->IoExpanderGetLevel(BSP_KNOB_BTN);
         };
         
-        ESP_ERROR_CHECK(iot_button_create(&btn_config, &btn_driver, &btns));
+        ESP_ERROR_CHECK(iot_button_create(&btn_config, btn_driver_, &btns));
         
         iot_button_register_cb(btns, BUTTON_SINGLE_CLICK, nullptr, [](void* button_handle, void* usr_data) {
             auto self = static_cast<SensecapWatcher*>(usr_data);
@@ -291,6 +290,19 @@ private:
     }
 
     void InitializeSpi() {
+        ESP_LOGI(TAG, "Initialize SSCMA SPI bus");
+        spi_bus_config_t spi_cfg = {0};
+
+        spi_cfg.mosi_io_num = BSP_SPI2_HOST_MOSI;
+        spi_cfg.miso_io_num = BSP_SPI2_HOST_MISO;
+        spi_cfg.sclk_io_num = BSP_SPI2_HOST_SCLK;
+        spi_cfg.quadwp_io_num = -1;
+        spi_cfg.quadhd_io_num = -1;
+        spi_cfg.isr_cpu_id = ESP_INTR_CPU_AFFINITY_1;
+        spi_cfg.max_transfer_sz = 4095;
+   
+        ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &spi_cfg, SPI_DMA_CH_AUTO));
+
         ESP_LOGI(TAG, "Initialize QSPI bus");
 
         spi_bus_config_t qspi_cfg = {0};
@@ -504,6 +516,27 @@ private:
         ESP_ERROR_CHECK(esp_console_start_repl(repl));
     }
 
+    void InitializeCamera() {
+
+        ESP_LOGI(TAG, "Initialize Camera");
+
+        // !!!NOTE: SD Card use same SPI bus as sscma client, so we need to disable SD card CS pin first
+        const gpio_config_t io_config = {
+            .pin_bit_mask = (1ULL << BSP_SD_SPI_CS),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        esp_err_t ret = gpio_config(&io_config);
+        if (ret != ESP_OK)
+            return;
+
+        gpio_set_level(BSP_SD_SPI_CS, 1);
+
+        camera_ = new SscmaCamera(io_exp_handle);
+    }
+
 public:
     SensecapWatcher() {
         ESP_LOGI(TAG, "Initialize Sensecap Watcher");
@@ -515,8 +548,9 @@ public:
         InitializeButton();
         InitializeKnob();
         Initializespd2010Display();
+        GetBacklight()->RestoreBrightness();  // 对于不带摄像头的版本，InitializeCamera需要3s, 所以先恢复背光亮度
+        InitializeCamera();
         InitializeIot();
-        GetBacklight()->RestoreBrightness();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
@@ -575,6 +609,10 @@ public:
             IoExpanderSetLevel(BSP_PWR_SYSTEM, 0);
         }
         return true;
+    }
+
+    virtual Camera* GetCamera() override {
+        return camera_;
     }
 };
 
