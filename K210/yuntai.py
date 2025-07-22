@@ -20,39 +20,51 @@ class AudioTargetDetector:
         self.uart =UART(UART.UART1, 115200, 8, 0, 1, timeout=1000, read_buf_len=4096)
 
     def get_target_err(self):
-        """返回值为（pitch_err,roll_err）"""
+        """返回值为（pitch_err,roll_err, high_err）"""
+
+        #1. 计算声源高度误差（垂直方向，控制Pitch轴）
         mic_data = mic.get_map()
         direction = mic.get_dir(mic_data)
         print("Direction data: {}".format(direction))
         mic.set_led(direction, (57, 197, 187))
 
         #计算声源向量
-        AngleX, AngleY = 0, 0
-        for i, strength in enumerate(direction):
-            AngleX += strength * math.sin(i * math.pi / 6)
-            AngleY += strength * math.cos(i * math.pi / 6)
+        vertical_strength = direction[6]
+        horizontal_avg = sum(direction[0:6])/6
 
-        #转换为误差信号
-        pitch_err = AngleX / max(abs(AngleX), 1e-6) * self.out_range
-        roll_err = AngleY / max(abs(AngleY), 1e-6) * self.out_range
+        height_err = (vertical_strength - horizontal_avg)/max(horizontal_avg, 1e-6) * self.out_range
+
+        height_err = max(-self.out_range, min(self.out_range, height_err))
+
+
+        #2. 计算水平平面误差（控制Roll轴360°旋转）
+        AngleX, AngleY = 0, 0
+        for i in range(6):
+            angle_rad = i * math.pi / 3
+            AngleX += direction[i] * math.sin(angle_rad)
+            AngleY += direction[i] * math.cos(angle_rad)
+
+        horizontal_err = math.atan2(AngleX,AngleY) / (math.pi) * self.out_range
+
 
         #忽略微小误差
-        if abs(pitch_err) < self.ignore_limit * self.out_range:
-            pitch_err = 0
-        if abs(roll_err) < self.ignore_limit * self.out_range:
-            roll_err = 0
+        if abs(height_err) < self.ignore_limit * self.out_range:
+            hright_err = 0
+        if abs(horizontal_err) < self.ignore_limit * self.out_range:
+            horizontal_err = 0
 
-        print("pitch_err:{},roll_err:{}".format(pitch_err, roll_err))
-        return pitch_err, roll_err
+        print("高度误差:{},水平误差:{}".format(height_err, horizontal_err))
+        return height_err, horizontal_err
 
     def deinit(self):
         mic.deinit()
 
 
 class Servo:
-    def __init__(self, pwm, dir=50, duty_min=2.5, duty_max=12.5, range_min=0, range_max=100):
+    def __init__(self, pwm, dir=50, duty_min=2.5, duty_max=12.5, range_min=0, range_max=100, is_roll=False):
         self.range_min = range_min
         self.range_max = range_max
+        self.is_roll = is_roll
         self.value = self._clamp(dir)
         self.pwm = pwm
         self.duty_min = duty_min
@@ -62,6 +74,11 @@ class Servo:
         self.pwm.duty(self.value/100*self.duty_range+self.duty_min)
 
     def _clamp(self, value):
+        if self.is_roll:
+            if value > self.range_max:
+                return self.range_max  # 触及180°边界
+            elif value < self.range_min:
+                return self.range_min
         return max(self.range_min, min(self.range_max, value))
 
     def enable(self,en):
@@ -70,22 +87,19 @@ class Servo:
         else:
             self.pwm.disable()
 
-    def dir(self , percentage):
-        percentage = self._clamp(percentage)
-        if percentage > 100:
-            percentage = 100
-        elif percentage < 0:
-            percentage = 0
-        self.pwm.duty(percentage/100*self.duty_range+self.duty_min)
-        self.value = percentage
 
     def drive(self,inc):
+        if self.is_roll:
+            next_value = self.value + inc
+
+            if next_value > self.range_max:
+                inc = -(next_value - self.range_max)
+            elif next_value < self.range_min:
+                inc = -(next_value - self.range_min)
+
         self.value += inc
         self.value = self._clamp(self.value)
-        if self.value > 100:
-            self.value =100
-        elif self.value < 0:
-            self.value = 0
+
         self.pwm.duty(self.value/100*self.duty_range+self.duty_min)
 
 
@@ -94,14 +108,23 @@ class PID:
     _kp = _ki = _kd = integrator = _imax = 0
     _last_error = _last_t = 0
     _RC = 1/(2 * pi *20)
-    def __init__(self, p=0, i=0, d=0, imax=0):
+    def __init__(self, p=0, i=0, d=0, imax=0, roll_range=(-180,180), is_roll=False):
         self._kp = float(p) # 比例系数
         self._ki = float(i) # 积分系数
         self._kd = float(d) # 微分系数
         self._imax = abs(imax)  #积分限幅值
         self._last_drivative = None # 上一次的微分值
+        self.roll_min, self.roll_max = roll_range
+        self.is_roll = is_roll
 
     def get_pid(self, error, scaler):   # error：当前误差，scaler：输出缩放因子（用于调整控制量范围）
+
+        if self.is_roll:
+            total_range = self.roll_max - self.roll_min
+
+            if abs(error) > total_range / 2:
+                error = error - total_range if error > 0 else error + total_range
+
         tnow = time.ticks_ms()
         dt = tnow - self._last_t
         output = 0
@@ -150,21 +173,19 @@ class PID:
 
 #云台控制
 class Gimbal:
-    def __init__(self, pitch, pid_pitch, roll=None, pid_roll=None, yaw=None, pid_yaw=None):
+    def __init__(self, pitch, pid_pitch, roll=None, pid_roll=None):
         self._pitch = pitch # 俯仰轴执行器（如舵机）
         self._roll = roll   # 横滚轴执行器（可选）
-        self._yaw = yaw     # 偏航轴执行器（可选）
         self._pid_pitch = pid_pitch # 俯仰轴PID控制器
         self._pid_roll = pid_roll   # 横滚轴PID控制器（可选）
-        self._pid_yaw = pid_yaw     # 偏航轴PID控制器（可选）
 
     # 预留接口，用于直接控制舵机
     def set_out(self, pitch, roll, yaw=None):
         pass
 
-    def run(self, pitch_err, roll_err=50, yaw_err=50, pitch_reverse=False, roll_reverse=False, yaw_reverse=False):
+    def run(self, height_err, horizontal_err=50, pitch_reverse=False, roll_reverse=False):
     # 俯仰轴控制
-        out = self._pid_pitch.get_pid(pitch_err, 1)
+        out = self._pid_pitch.get_pid(height_err, 1)
         #print("err:{}, out:{}".format(pitch_err, out))
         out = max(-3, min(3, out))
         if pitch_reverse:
@@ -172,19 +193,13 @@ class Gimbal:
         self._pitch.drive(out)
 
     # 横滚轴控制（如果存在）
-        if self._roll:
-            out = self._pid_roll.get_pid(roll_err, 1)
-            out = max(-5, min(5, out))
-            if roll_reverse:
-                out = - out
-            self._roll.drive(out)
+        if self._roll and self._pid_roll:
+            roll_out = self._pid_roll.get_pid(horizontal_err, 1)
 
-    # 偏航轴控制（如果存在）
-        if self._yaw:
-            out = self._pid_yaw.get_pid(yaw_err, 1)
-            if yaw_reverse:
-                out = - out
-            self._yaw.drive(out)
+            roll_out = max(-5, min(5, out))
+            if roll_reverse:
+                roll_out = - roll_out
+            self._roll.drive(roll_out)
 
 
 def main():
@@ -198,14 +213,16 @@ def main():
         "init_pitch": 50,
         "init_roll": 50,
 
-        "pitch_pid": [0.3, 0, 0.02, 0],
-        "roll_pid": [0.25, 0, 0.015, 0],
+        "pitch_pid": [0.4, 0.02, 0.03, 5],
+        "roll_pid": [0.3, 0.01, 0.02, 10],
 
         "pitch_reverse": False,
         "roll_reverse": True,
 
         "audio_range": 10,
-        "ignore_threshold": 0.02
+        "ignore_threshold": 0.05,
+
+        "roll_range": (20, 80)
        }
 
     detector = AudioTargetDetector(
@@ -213,20 +230,28 @@ def main():
         ignore_limit=config["ignore_threshold"]
     )
 
-    pid_pitch = PID(*config["pitch_pid"])
-    pid_roll = PID(*config["roll_pid"])
+    pid_pitch = PID(
+        *config["pitch_pid"],
+        is_roll=False
+    )
+    pid_roll = PID(
+        *config["roll_pid"],
+        is_roll=True
+    )
 
     pitch_servo = Servo(
         pwm_pitch,
         dir=config["init_pitch"],
         range_min=0,
-        range_max=100
+        range_max=100,
+        is_roll=False
     )
     roll_servo = Servo(
         pwm_roll,
         dir=config["init_roll"],
         range_min=0,
-        range_max=100
+        range_max=100,
+        is_roll=True
     )
 
     gimbal = Gimbal(
@@ -239,17 +264,17 @@ def main():
     try:
         while True:
 
-            pitch_err, roll_err = detector.get_target_err()
+            height_err, horizontal_err = detector.get_target_err()
 
             gimbal.run(
-                pitch_err = pitch_err,
-                roll_err = roll_err,
+                height_err = height_err,
+                horizontal_err = horizontal_err,
                 pitch_reverse = config["pitch_reverse"],
                 roll_reverse = config["roll_reverse"]
             )
             time.sleep_ms(10)
 
-            if time.time() - start_time > 30:
+            if time.time() - start_time > 120:
                 print("程序超时终止")
                 break
     except Exception as e:
@@ -258,10 +283,9 @@ def main():
         detector.deinit()
         pitch_servo.drive(config["init_pitch"])
         roll_servo.drive(config["init_roll"])
+        pitch_servo.enable(False)
+        roll_servo.enable(False)
 
 #主程序入口
 if __name__=="__main__":
     main()
-
-
-
