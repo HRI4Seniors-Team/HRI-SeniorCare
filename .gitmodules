@@ -1,0 +1,6 @@
+[submodule "xiaozhi-esp32"]
+	path = xiaozhi-esp32
+	url = git@github.com:Thintime123/xiaozhi-esp32.git
+[submodule "xiaozhi-esp32-server"]
+	path = xiaozhi-esp32-server
+	url = git@github.com:Thintime123/xiaozhi-esp32-server.git
