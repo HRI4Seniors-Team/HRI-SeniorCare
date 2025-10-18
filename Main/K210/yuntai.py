@@ -26,7 +26,7 @@ class AudioTargetDetector:
         mic_data = mic.get_map()
         direction = mic.get_dir(mic_data)
         print("Direction data: {}".format(direction))
-        mic.set_led(direction, (57, 197, 187))
+        mic.set_led(direction, (0, 255, 0))
 
         #计算声源向量
         vertical_strength = direction[6]
@@ -213,7 +213,7 @@ def main():
         "init_pitch": 50,
         "init_roll": 50,
 
-        "pitch_pid": [0.4, 0.02, 0.03, 5],
+        "pitch_pid": [0.3, 0.01, 0.02, 5],
         "roll_pid": [0.3, 0.01, 0.02, 10],
 
         "pitch_reverse": False,
