@@ -14,10 +14,17 @@ https://espressif.github.io/esp-launchpad/
 source /opt/esp-idf/export.sh
 
 查看串口
-sudo dmesg | grep tty
+ls /dev/ttyACM*
+ls /dev/ttyUSB*
 
 idf.py menuconfig         # 改唤醒词
 idf.py build
 idf.py -p /dev/ttyACM0 erase-flash
 idf.py -p /dev/ttyACM0 flash
 idf.py -p /dev/ttyACM0 monitor
+
+烧录k210固件
+sudo kflash -p /dev/ttyUSB0 -b 1500000 ~/Download/maixpy_v0.6.3_2_gd8901fd22.bin
+
+查看或删除k210已有文件
+mpremote connect /dev/ttyUSB0 fs cat /flash/main.py

@@ -1,23 +1,47 @@
 import time, sys, math
+# 引入定时器和PWM模块
 from machine import Timer,PWM
 
 from math import pi
 from machine import UART
 from Maix import MIC_ARRAY as mic
 
+import lcd, image
 
+# 音频目标检测类
+# 输入参数：
+#   out_range: 输出误差范围，默认为10
+#   ignore_limit: 忽略微小误差的阈值比例，默认为0.02（即2%）
+# 输出：
+#   get_target_err()：返回声源高度误差和水平误差的元组（height_err, horizontal_err）
 class AudioTargetDetector:
     def __init__(self, out_range=10, ignore_limit=0.02):
         self.out_range = out_range
         self.ignore_limit = ignore_limit
         self.__init_microphone()
 
+        self.__turn_off_all_leds()
+
     def __init_microphone(self):
         mic.init()
+        #mic.init(
+            #i2s_d0=23, i2s_d1=22, i2s_d2=21, i2s_d3=20,
+            #i2s_ws=19, i2s_sclk=18, sk9822_dat=10, sk9822_clk=9)
         mic.init(
-            i2s_d0=23, i2s_d1=22, i2s_d2=21, i2s_d3=20,
-            i2s_ws=19, i2s_sclk=18, sk9822_dat=10, sk9822_clk=9)
+            i2s_d0=22,
+            i2s_d1=23,
+            i2s_d2=21,
+            i2s_d3=20,
+            i2s_ws=19,
+            i2s_sclk=18, # MIC_CK
+            sk9822_dat=10,
+            sk9822_clk=9 # LED_CK
+                )
+
         self.uart =UART(UART.UART1, 115200, 8, 0, 1, timeout=1000, read_buf_len=4096)
+
+    def __turn_off_all_leds(self):
+        mic.set_led([1] * 12, (0,0,0))
 
     def get_target_err(self):
         """返回值为（pitch_err,roll_err, high_err）"""
@@ -36,11 +60,17 @@ class AudioTargetDetector:
 
         height_err = max(-self.out_range, min(self.out_range, height_err))
 
+        # # 常见偏移值：
+        # 0: 第0个麦克风已经指向正前方
+        # math.pi/6: 需要顺时针旋转30°
+        # -math.pi/6: 需要逆时针旋转30°
+        # math.pi/3: 需要顺时针旋转60°
+        angle_offset = 0
 
         #2. 计算水平平面误差（控制Roll轴360°旋转）
         AngleX, AngleY = 0, 0
         for i in range(6):
-            angle_rad = i * math.pi / 3
+            angle_rad = i * math.pi / 3 + angle_offset
             AngleX += direction[i] * math.sin(angle_rad)
             AngleY += direction[i] * math.cos(angle_rad)
 
@@ -49,7 +79,7 @@ class AudioTargetDetector:
 
         #忽略微小误差
         if abs(height_err) < self.ignore_limit * self.out_range:
-            hright_err = 0
+            height_err = 0
         if abs(horizontal_err) < self.ignore_limit * self.out_range:
             horizontal_err = 0
 
@@ -59,7 +89,18 @@ class AudioTargetDetector:
     def deinit(self):
         mic.deinit()
 
-
+# 舵机控制类
+# 输入参数：
+#   pwm: PWM对象
+#   dir: 初始位置，默认50（范围0-100）
+#   duty_min: 最小占空比，默认2.5%
+#   duty_max: 最大占空比，默认12.5%
+#   range_min: 最小控制范围，默认0
+#   range_max: 最大控制范围，默认100
+#   is_roll: 是否为横滚轴控制，默认False
+# 输出：
+#   drive(inc)：根据增量inc调整舵机位置
+#   enable(en)：启用或禁用舵机
 class Servo:
     def __init__(self, pwm, dir=50, duty_min=2.5, duty_max=12.5, range_min=0, range_max=100, is_roll=False):
         self.range_min = range_min
@@ -201,6 +242,71 @@ class Gimbal:
                 roll_out = - roll_out
             self._roll.drive(roll_out)
 
+_img_buf = None
+def lcd_setup(rotation=0):
+    try:
+        lcd.init()
+        lcd.rotation(rotation)
+        lcd.clear(lcd.RED)
+    except:
+        pass
+
+# 在 LCD 上显示相对角度信息
+# pitch_val/roll_val：当前 Servo.value（0~100）
+# init_pitch/init_roll：初始位置（可用 config 里的 init_*）
+# *_scale：单位换算，默认 1.8°/单位（0~100 → 0~180°）
+# *_invert：方向反转（机构/安装导致方向相反时设 True）
+# 说明：本函数不修改任何舵机，只负责画图
+def lcd_show_gimbal_delta(pitch_val, roll_val,
+                          init_pitch=50, init_roll=50,
+                          pitch_scale=1.8, roll_scale=1.8,
+                          pitch_invert=False, roll_invert=False):
+    global _img_buf
+    W, H = 320, 240
+    if _img_buf is None:
+        _img_buf = image.Image(size=(W, H))
+
+    # 计算“相对初始”的角度（度）
+    d_pitch = (pitch_val - init_pitch) * pitch_scale
+    d_roll  = (roll_val  - init_roll)  * roll_scale
+
+    if pitch_invert: d_pitch = -d_pitch
+    if roll_invert:  d_roll  = -d_roll
+
+    # 方向文案
+    def sign_text(v, up_txt, down_txt):
+        if v > 0:  return up_txt,  abs(v)
+        if v < 0:  return down_txt, abs(v)
+        return "No change", 0.0
+
+    pitch_dir, pitch_abs = sign_text(d_pitch, "down", "up")
+    roll_dir,  roll_abs  = sign_text(d_roll,  "left", "right")
+
+    # 画面
+    _img_buf.clear()
+    _img_buf.draw_string(8, 8,  "Gimbal status", color=(255,255,255), scale=2)
+
+    # 俯仰
+    _img_buf.draw_string(8, 50, "Pitch:", color=(0,255,255), scale=2)
+    _img_buf.draw_string(8, 80, "%s  %5.1f°" % (pitch_dir, pitch_abs),
+                         color=(0,255,0) if pitch_dir!="No change" else (200,200,200), scale=2)
+
+    # 水平
+    _img_buf.draw_string(8, 130,"Roll:", color=(0,255,255), scale=2)
+    _img_buf.draw_string(8, 160,"%s  %5.1f°" % (roll_dir, roll_abs),
+                         color=(0,200,255) if roll_dir!="No change" else (200,200,200), scale=2)
+
+    # 简单指示条（±90°范围可视化）
+    # pitch
+    bar_x, bar_y, bar_w, bar_h = 8, 200, 300, 12
+    _img_buf.draw_rectangle(bar_x-2, bar_y-2, bar_w+4, bar_h+4, color=(80,80,160), thickness=2)
+    p = max(-90, min(90, d_pitch))
+    p_w = int((p + 90) / 180.0 * bar_w)
+    _img_buf.draw_rectangle(bar_x, bar_y, p_w, bar_h, color=(0,255,0), thickness=-1)
+    _img_buf.draw_string(bar_x+bar_w+6, bar_y-4, "%+3.0f" % p, color=(0,255,0), scale=2)
+
+    lcd.display(_img_buf)
+
 
 def main():
 
@@ -209,20 +315,23 @@ def main():
     pwm_pitch = PWM(tim_pitch, freq=50, duty=0, pin=7)
     pwm_roll = PWM(tim_roll, freq=50, duty=0, pin=8)
 
+    
     config = {
         "init_pitch": 50,
         "init_roll": 50,
 
-        "pitch_pid": [0.3, 0.01, 0.02, 5],
-        "roll_pid": [0.3, 0.01, 0.02, 10],
+        "pitch_pid": [0.5, 0.02, 0.03, 5],
+        "roll_pid": [0.5, 0.02, 0.03, 10],
 
         "pitch_reverse": False,
         "roll_reverse": True,
 
+        # "audio_range": 15,
         "audio_range": 10,
-        "ignore_threshold": 0.05,
+        # "ignore_threshold": 0.005,
+        "ignore_threshold": 0.1,
 
-        "roll_range": (20, 80)
+        "roll_range": (10, 90)
        }
 
     detector = AudioTargetDetector(
@@ -261,6 +370,15 @@ def main():
         pid_roll=pid_roll
     )
     start_time = time.time()
+
+    lcd_setup(rotation=0)
+    # 记录舵机初始位置
+    init_pitch = config["init_pitch"]
+    init_roll  = config["init_roll"]
+    
+    pitch_disp_invert = False
+    roll_disp_invert  = False
+    
     try:
         while True:
 
@@ -272,6 +390,18 @@ def main():
                 pitch_reverse = config["pitch_reverse"],
                 roll_reverse = config["roll_reverse"]
             )
+            
+            lcd_show_gimbal_delta(
+                pitch_val=pitch_servo.value,
+                roll_val=roll_servo.value,
+                init_pitch=init_pitch,
+                init_roll=init_roll,
+                pitch_scale=1.8,     # 0~100 → 0~180° 的默认比例
+                roll_scale=1.8,
+                pitch_invert=pitch_disp_invert,
+                roll_invert=roll_disp_invert
+            )
+            
             time.sleep_ms(10)
 
             if time.time() - start_time > 120:
