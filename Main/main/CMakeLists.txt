@@ -35,9 +35,10 @@ set(SOURCES "audio/audio_codec.cc"
             "device_state_event.cc"
             "assets.cc"
             "main.cc"
+            "uart_k210/uart_k210.cc"
             )
 
-set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols")
+set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg" "audio" "protocols" "uart_k210")
 
 # Add board common files
 file(GLOB BOARD_COMMON_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/boards/common/*.cc)

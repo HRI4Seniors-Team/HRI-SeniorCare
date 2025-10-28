@@ -8,7 +8,7 @@ from servo import Servo
 from doa_calc import PID
 from gimbal import Gimbal
 from led_ring import lcd_setup, lcd_show_gimbal_delta
-from uart_comm import uart
+from uart_comm import UartComm
 from config import load_config_from_json
 
 def main():
@@ -68,6 +68,8 @@ def main():
     pitch_disp_invert = False
     roll_disp_invert  = False
     
+    uart_esp = UartComm()
+    
     try:
         while True:
 
@@ -91,12 +93,12 @@ def main():
                 roll_invert=roll_disp_invert
             )
             
-            data = uart.read()
+            uart_esp.send("Hello ESP32!\n")
+            data = uart_esp.receive_line(timeout_ms=100)
             if data:
-                print("Received:", data)
-                uart.write(b"ACK\n")
-            time.sleep(0.1)
-            
+                # print(f"Got from ESP32: {data}")
+                print("Got from ESP32: {}".format(data))
+
             time.sleep_ms(10)
 
             if time.time() - start_time > 120:

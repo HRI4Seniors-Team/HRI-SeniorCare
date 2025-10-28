@@ -19,4 +19,4 @@ mmap_generate_*.h
 .clangd
 
 .obsidian
-MAIN/res
+Main/res

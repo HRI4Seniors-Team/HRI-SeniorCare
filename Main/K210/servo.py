@@ -53,3 +53,37 @@ class Servo:
         self.value = self._clamp(self.value)
 
         self.pwm.duty(self.value/100*self.duty_range+self.duty_min)
+
+    def set_position(self, position):
+        """设置绝对位置"""
+        self.value = self._clamp(position)
+        duty = self.value/100*self.duty_range + self.duty_min
+        self.pwm.duty(duty)
+        return self.value
+
+    def get_position(self):
+        """获取当前位置"""
+        return self.value
+
+    def turn_left(self, amount=5):
+        """向左转指定角度"""
+        if amount < 0:
+            amount = abs(amount)  # 确保amount为正数
+        return self.drive(-amount)
+
+    def turn_right(self, amount=5):
+        """向右转指定角度"""
+        if amount < 0:
+            amount = abs(amount)  # 确保amount为正数
+        return self.drive(amount)
+
+    def get_info(self):
+        """获取舵机状态信息"""
+        return {
+            "current_position": self.value,
+            "range_min": self.range_min,
+            "range_max": self.range_max,
+            "is_roll": self.is_roll,
+            "duty_min": self.duty_min,
+            "duty_max": self.duty_max
+        }

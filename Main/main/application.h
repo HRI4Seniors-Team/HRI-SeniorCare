@@ -16,6 +16,8 @@
 #include "audio_service.h"
 #include "device_state_event.h"
 
+#include "./uart_k210/uart_k210.h"
+
 
 #define MAIN_EVENT_SCHEDULE (1 << 0)
 #define MAIN_EVENT_SEND_AUDIO (1 << 1)
@@ -64,6 +66,8 @@ public:
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
 
+    UartK210& GetUartK210() { return uart_k210_; }
+
 private:
     Application();
     ~Application();
@@ -84,6 +88,8 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t check_new_version_task_handle_ = nullptr;
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
+
+    UartK210 uart_k210_;
 
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);

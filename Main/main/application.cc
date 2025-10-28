@@ -541,6 +541,9 @@ void Application::Start() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     }
+
+    uart_k210_.Init();
+    uart_k210_.StartReceiveTask(); // 启动持续接收数据的任务
 }
 
 // Add a async task to MainLoop
