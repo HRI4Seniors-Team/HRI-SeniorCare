@@ -25,6 +25,7 @@ void UartK210::Init() {
 
 void UartK210::SendData(const char* data, size_t len) {
     uart_write_bytes(UART_NUM_, data, len);
+    ESP_LOGI(TAG, "Sent to K210: %.*s (LOG)", len, data);
 }
 
 int UartK210::ReceiveData(uint8_t* buffer, size_t max_len, uint32_t timeout_ms) {

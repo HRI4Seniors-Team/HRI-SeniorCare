@@ -542,7 +542,30 @@ void Application::Start() {
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     }
 
+    ESP_LOGI(TAG, "Initializing UART for K210...");
     uart_k210_.Init();
+
+    // application.cc - Application::Start() 中，Init() 之后
+    xTaskCreate([](void* arg) {
+        auto& uart = Application::GetInstance().GetUartK210();
+        TickType_t start = xTaskGetTickCount();
+
+        while (true) {
+            uart.SendData("PING\n", 5);
+            vTaskDelay(pdMS_TO_TICKS(
+                (xTaskGetTickCount() - start) < pdMS_TO_TICKS(10000) ? 1000 : 5000
+            ));
+        }
+    }, "uart_k210_heartbeat", 2048, nullptr, 3, nullptr);
+
+    // vTaskDelay(pdMS_TO_TICKS(500));
+    ESP_LOGI(TAG, "Starting UART receive task...");
+    
+    // 关键：先开口说话，且要以'\n'结尾，K210按行解析
+    const char* cmd = "GET_STATE\n";
+    uart_k210_.SendData(cmd, strlen(cmd));
+    ESP_LOGI(TAG, "Sent to K210: %s", cmd);
+
     uart_k210_.StartReceiveTask(); // 启动持续接收数据的任务
 }
 

@@ -8,6 +8,7 @@
 #include <freertos/task.h>
 
 #include "application.h"
+#include "freertos/projdefs.h"
 #include "system_info.h"
 
 #define TAG "main"
@@ -29,5 +30,4 @@ extern "C" void app_main(void)
     // Launch the application
     auto& app = Application::GetInstance();
     app.Start();
-    app.GetUartK210().SendData("Hello K210!\n", 13);
 }

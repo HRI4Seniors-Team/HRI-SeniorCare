@@ -27,7 +27,7 @@ def get_default_config():
         
         # 超时配置
         "main_timeout": 120,    # 主程序运行超时时间（秒）
-        "loop_delay": 0.01      # 主循环延迟（秒）
+        "loop_delay": 0.05      # 主循环延迟（秒）
     }
 
 def load_config_from_json(filename="config.json"):

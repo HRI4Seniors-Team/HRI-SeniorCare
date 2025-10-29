@@ -33,7 +33,7 @@ class AudioTargetDetector:
             sk9822_clk=9 # LED_CK
                 )
 
-        self.uart =UART(UART.UART1, 115200, 8, 0, 1, timeout=1000, read_buf_len=4096)
+        # self.uart = UART(UART.UART1, 115200, 8, 0, 1, timeout=1000, read_buf_len=4096)
 
     def __turn_off_all_leds(self):
         mic.set_led([1] * 12, (0,0,0))
