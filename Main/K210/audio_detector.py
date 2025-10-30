@@ -19,9 +19,7 @@ class AudioTargetDetector:
 
     def __init_microphone(self):
         mic.init()
-        #mic.init(
-            #i2s_d0=23, i2s_d1=22, i2s_d2=21, i2s_d3=20,
-            #i2s_ws=19, i2s_sclk=18, sk9822_dat=10, sk9822_clk=9)
+
         mic.init(
             i2s_d0=22,
             i2s_d1=23,
@@ -33,8 +31,6 @@ class AudioTargetDetector:
             sk9822_clk=9 # LED_CK
                 )
 
-        # self.uart = UART(UART.UART1, 115200, 8, 0, 1, timeout=1000, read_buf_len=4096)
-
     def __turn_off_all_leds(self):
         mic.set_led([1] * 12, (0,0,0))
 
@@ -44,7 +40,7 @@ class AudioTargetDetector:
         #1. 计算声源高度误差（垂直方向，控制Pitch轴）
         mic_data = mic.get_map()
         direction = mic.get_dir(mic_data)
-        print("Direction data: {}".format(direction))
+        print("(K210) Direction data: {}".format(direction))
         mic.set_led(direction, (0, 255, 0))
 
         #计算声源向量
@@ -70,7 +66,6 @@ class AudioTargetDetector:
             AngleY += direction[i] * math.cos(angle_rad)
 
         horizontal_err = math.atan2(AngleX,AngleY) / (math.pi) * self.out_range
-
 
         #忽略微小误差
         if abs(height_err) < self.ignore_limit * self.out_range:

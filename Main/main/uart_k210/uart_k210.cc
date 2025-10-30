@@ -3,7 +3,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
-#define TAG "UART_K210"
+#define TAG "UART_K210(ESP32)"
 
 void UartK210::Init() {
     uart_config_t uart_config = {
@@ -37,15 +37,25 @@ void UartK210::StartReceiveTask() {
     xTaskCreate([](void* param) {
         UartK210* uart = static_cast<UartK210*>(param);
         uint8_t buffer[BUF_SIZE];
+        size_t index = 0;
         
         while (1) {
-            int len = uart->ReceiveData(buffer, BUF_SIZE - 1, 100);
+            uint8_t byte;
+            int len = uart->ReceiveData(&byte, 1, 100);  // 每次读 1 字节
+            
             if (len > 0) {
-                buffer[len] = '\0';
-                ESP_LOGI(TAG, "Received from K210: %s", buffer);
-                
-                // 在这里处理接收到的数据
-                // 例如:解析命令、触发事件等
+                if (byte == '\n') {
+                    // 收到完整一行
+                    buffer[index] = '\0';
+                    ESP_LOGI(TAG, "Received line: %s", buffer);
+                    index = 0;  // 重置缓冲区
+                } else if (index < BUF_SIZE - 1) {
+                    buffer[index++] = byte;
+                } else {
+                    // 缓冲区满，丢弃
+                    ESP_LOGW(TAG, "Buffer overflow, resetting");
+                    index = 0;
+                }
             }
         }
     }, "uart_rx_task", 4096, this, 5, NULL);

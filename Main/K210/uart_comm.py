@@ -2,39 +2,49 @@ from machine import UART
 import time
 from board import board_info
 from fpioa_manager import fm
+from Maix import GPIO
 
 class UartComm:
     def __init__(self):
         # 初始化 UART1, 波特率 115200
         # K210: IO4=RX(接ESP32的TX/GPIO17), IO5=TX(接ESP32的RX/GPIO18)
 
-        try:
-            fm.unregister(fm.fpioa.UART1_RX)
-        except ValueError:
-            pass
-        try:
-            fm.unregister(fm.fpioa.UART1_TX)
-        except ValueError:
-            pass
+        # try:
+        #     fm.unregister(fm.fpioa.UART1_RX)
+        # except ValueError:
+        #     pass
+        # try:
+        #     fm.unregister(fm.fpioa.UART1_TX)
+        # except ValueError:
+        #     pass
+
+        # 先释放原来的映射，避免和 REPL 冲突
+        for func in (fm.fpioa.UARTHS_RX, fm.fpioa.UARTHS_TX):
+            try:
+                fm.unregister(func)
+            except ValueError:
+                pass
 
         try:
-            fm.register(13, fm.fpioa.UART1_RX, force=True)  # IO4 ← ESP32 TX
-            fm.register(12, fm.fpioa.UART1_TX, force=True)  # IO5 → ESP32 RX
-            print("UART pins registered: RX=IO4, TX=IO5")
+            # fm.register(13, fm.fpioa.UART1_RX, force=True)  # IO4 ← ESP32 TX
+            # fm.register(12, fm.fpioa.UART1_TX, force=True)  # IO5 → ESP32 RX
+
+            fm.register(board_info.PIN4, fm.fpioa.UARTHS_RX, force=True)  # IO4 ← ESP32 TX
+            fm.register(board_info.PIN5, fm.fpioa.UARTHS_TX, force=True)  # IO5 → ESP32 RX
+
+            print("(k210) UART pins registered: RX=IO4, TX=IO5")
         except:
+            print("(k210) Failed to register UART1 pins")
             pass
-        # fm.register(board_info.PIN4, fm.fpioa.UART1_RX, force=True)
-        # fm.register(board_info.PIN5, fm.fpioa.UART1_TX, force=True)
-        # 如果没有 board_info，就直接写数字 4 / 5，同样记得 force=True
 
-        self.uart = UART(UART.UART1, 115200, read_buf_len=4096)
-        print("UART initialized: 115200 baud")
-    
+        self.uart = UART(UART.UARTHS, 115200, read_buf_len=4096)
+        print("(k210) UART initialized: 115200 baud")
+
     # 清空缓冲区
         if self.uart.any():
             self.uart.read()
-            print("Cleared UART buffer")
-            
+            print("(k210) Cleared UART buffer")
+
     def send(self, data):
         """发送数据到 ESP32"""
         if isinstance(data, str):
@@ -62,7 +72,7 @@ class UartComm:
         while time.ticks_diff(time.ticks_ms(), start) < timeout_ms:
             if self.uart.any():
                 char = self.uart.read(1)
-                print('Received char(LOG): {}'.format(char))
+                print('(k210) Received char: {}'.format(char))
                 if char:
                     buffer += char
                     if char == b'\n':
@@ -75,8 +85,9 @@ class UartComm:
         # 超时检查
         if buffer:
             result = buffer.decode('utf-8').strip() if buffer else None
-            print("Timeout with partial data: [{}]".format(result))
+            print("(k210) Timeout with partial data: [{}]".format(result))
             return result
+        print("(k210) Receive line timeout with no data")
         return None
     
     def start_receive_task(self, callback):
@@ -89,6 +100,6 @@ class UartComm:
             data = self.receive_line()
             if data:
                 # print(f"Received from ESP32: {data}")
-                print("Received from ESP32: {}".format(data))
+                print("(k210) Received from ESP32: {}".format(data))
                 callback(data)
             time.sleep_ms(10)

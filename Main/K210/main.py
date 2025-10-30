@@ -12,7 +12,6 @@ from uart_comm import UartComm
 from config import load_config_from_json
 
 def main():
-    """主程序函数"""
     
     # 初始化PWM定时器
     tim_pitch = Timer(Timer.TIMER0, Timer.CHANNEL0, mode=Timer.MODE_PWM)
@@ -144,7 +143,7 @@ def main():
             state["tracking_enabled"] = False
             return format_status("ACK DISABLE_TRACKING")
 
-        return "ERROR unknown_command"
+        return "ERROR unknown_command: {}".format(cmd)
     
     try:
         while True:
@@ -170,17 +169,15 @@ def main():
                 roll_invert=roll_disp_invert
             )
             
-            data = uart_esp.receive_line(timeout_ms=100)
+            data = uart_esp.receive_line(timeout_ms=1000)
             if data:
                 # print(f"Got from ESP32: {data}")
-                print("Got from ESP32: {}".format(data))
+                print("(k210) Got from ESP32: {}".format(data))
                 response = handle_command(data)
                 if response:
                     uart_esp.send(response + "\n")
                     print()
-                    print()
-                    print("Response sent: {}".format(response))
-                    print()
+                    print("(k210) Response sent: {}".format(response))
                     print()
 
             if loop_delay_ms > 0:

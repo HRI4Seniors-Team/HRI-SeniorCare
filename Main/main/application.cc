@@ -551,7 +551,7 @@ void Application::Start() {
         TickType_t start = xTaskGetTickCount();
 
         while (true) {
-            uart.SendData("PING\n", 5);
+            uart.SendData("To k210 PING\n", 13);
             vTaskDelay(pdMS_TO_TICKS(
                 (xTaskGetTickCount() - start) < pdMS_TO_TICKS(10000) ? 1000 : 5000
             ));
@@ -559,7 +559,7 @@ void Application::Start() {
     }, "uart_k210_heartbeat", 2048, nullptr, 3, nullptr);
 
     // vTaskDelay(pdMS_TO_TICKS(500));
-    ESP_LOGI(TAG, "Starting UART receive task...");
+    ESP_LOGI(TAG, "(ESP32) Starting UART receive task...");
     
     // 关键：先开口说话，且要以'\n'结尾，K210按行解析
     const char* cmd = "GET_STATE\n";

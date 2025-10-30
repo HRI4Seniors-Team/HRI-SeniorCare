@@ -4,10 +4,10 @@
 #云台控制
 class Gimbal:
     def __init__(self, pitch, pid_pitch, roll=None, pid_roll=None):
-        self._pitch = pitch # 俯仰轴执行器（如舵机）
-        self._roll = roll   # 横滚轴执行器（可选）
+        self._pitch = pitch
+        self._roll = roll
         self._pid_pitch = pid_pitch # 俯仰轴PID控制器
-        self._pid_roll = pid_roll   # 横滚轴PID控制器（可选）
+        self._pid_roll = pid_roll   # 横滚轴PID控制器
 
     # 预留接口，用于直接控制舵机
     def set_out(self, pitch, roll, yaw=None):
