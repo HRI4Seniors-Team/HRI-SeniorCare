@@ -2,6 +2,407 @@
 
 （中文 | [English](README_en.md) | [日本語](README_ja.md)）
 
+## 项目说明
+
+本项目为基于 [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) (v2.0.4版本)项目的扩展，以下是一些本项目做的一些扩展功能说明：
+- 新增 K210 音频跟踪模块
+	- 音频目标检测：接入 MEMS7 麦克风阵列，并实现实时声源定位。
+	- 云台控制系统：接入两个 sg90 云台进行双轴控制，自动追踪声源，为后续接入摄像头等其他设备做准备。
+	- ESP32S3 串口通信：实现 ESP32S3 与 K210 的 UART 双向通信。
+	- 状态显示：在 K210 LCD 屏上实时显示云台角度和追踪状态等信息。
+- MCP 服务：实现使用语音控制舵机的旋转与状态。
+
+## 引脚对接与参数配置
+
+### 引脚对接说明
+
+#### **sipeed maixbit K210 与 MEMS7麦克风引脚对接**
+
+```python
+mic.init(
+    i2s_d0=22,
+    i2s_d1=23,
+    i2s_d2=21,
+    i2s_d3=20,
+    i2s_ws=19,
+    i2s_sclk=18, # MIC_CK
+    sk9822_dat=10,
+    sk9822_clk=9 # LED_CK
+)
+```
+
+#### **K210 与 两个 sg90 的 PWM 引脚对接**
+
+| K210 PWM | sg90  |
+| -------- | ----- |
+| IO7      | Pitch |
+| IO8      | Roll  |
+
+#### **ESP32S3 N16R8 与 sipeed maixbit K210 串口通信引脚对接**
+
+
+| esp32s3<br>UART1 | K210<br>UARTHS|
+| ---------------- | ------------- |
+| GPIO17 U1TXD     | IO4 ISP_RX (13) |
+| GPIO18 U1RXD     | IO5 ISP_TX (12) |
+| GND              | GND           |
+
+### 舵机控制相关配置
+
+#### 参数示例配置
+
+```yaml
+{
+  "init_pitch": 50,                     # 俯仰轴初始位置 (0-100)
+  "init_roll": 50,                      # 横滚轴初始位置 (0-100)
+  "pitch_pid": [0.5, 0.02, 0.03, 5],    # 俯仰轴 PID 参数 [P, I, D, I_max]
+  "roll_pid": [0.5, 0.02, 0.03, 10],    # 横滚轴 PID 参数 [P, I, D, I_max]
+  "pitch_reverse": false,               # 俯仰轴反向控制 (true=反向, false=正向)
+  "roll_reverse": true,                 # 横滚轴反向控制 (true=反向, false=正向)
+  "audio_range": 10,                    # 音频检测输出范围 (误差放大系数)
+  "ignore_threshold": 0.1,              # 忽略阈值 (声音强度低于此值将被忽略)
+  "roll_range": [10, 90],               # 横滚轴运动范围限制 [最小角度, 最大角度]
+  "lcd_rotation": 0,                    # LCD 屏幕旋转角度 (0/90/180/270)
+  "pitch_scale": 1.8,                   # 俯仰轴显示比例系数 (LCD 可视化缩放)
+  "roll_scale": 1.8,                    # 横滚轴显示比例系数 (LCD 可视化缩放)
+  "main_timeout": 120,                  # 主程序超时时间 (秒, 运行此时长后自动退出)
+  "loop_delay": 0.01                    # 主循环延迟 (秒, 控制循环频率)
+}
+```
+
+
+#### 参数调整
+
+通过修改 `config.json` 或直接修改 `config.py` 中的默认值来调整系统参数：
+
+##### 1. `ignore_threshold`（忽略阈值）
+
+含义:
+
+- 声音强度低于此阈值的声源会被忽略
+- 数值越大 = 越不灵敏(过滤掉更多小声音)
+- 数值越小 = 越灵敏(响应更多微弱声音)
+
+效果：
+
+```yaml
+# 降低灵敏度(只响应大声音)
+"ignore_threshold": 8    # 忽略强度 < 8 的声音,只响应强烈声源
+
+# 提高灵敏度(响应小声音)
+"ignore_threshold": 2    # 忽略强度 < 2 的声音,能检测到轻微声音
+
+# 最灵敏(几乎响应所有声音)
+"ignore_threshold": 0    # 不忽略任何声音
+```
+
+推荐值:
+
+- 不灵敏(养老院环境,过滤背景噪音): 6-10
+- 中等灵敏(正常室内): 3-5
+- 高灵敏(安静环境,需要检测轻声): 1-2
+
+##### 2. `audio_range` (音频检测范围)
+
+含义:
+
+- 定义有效声源的方向范围 [最小角度, 最大角度]
+- 范围越窄 = 越不容易触发(只响应特定方向)
+- 范围越宽 = 越容易触发(响应更大范围的声音)
+
+效果：
+
+```yaml
+# 降低灵敏度(只响应正前方)
+"audio_range": [-30, 30]   # 只检测 ±30° 范围内的声音
+
+# 提高灵敏度(响应几乎所有方向)
+"audio_range": [-160, 160] # 检测 ±160° 范围内的声音(接近360°)
+
+# 中等灵敏度
+"audio_range": [-90, 90]   # 检测 ±90° 范围内的声音(半圆)
+```
+
+推荐值:
+
+- 不灵敏(只关注正前方): [-45, 45] 或 [-30, 30]
+- 中等灵敏(前方半球): [-90, 90]
+- 高灵敏(几乎全方位): [-150, 150]
+
+## 串口通信与 MCP 说明
+
+### UART 通信
+
+**K210 端**
+```python
+class UartComm:
+    def __init__(self):
+        # 初始化 UART1, 波特率 115200
+        # K210: IO4=RX(接ESP32的TX/GPIO17), IO5=TX(接ESP32的RX/GPIO18)
+
+        # try:
+        #     fm.unregister(fm.fpioa.UART1_RX)
+        # except ValueError:
+        #     pass
+        # try:
+        #     fm.unregister(fm.fpioa.UART1_TX)
+        # except ValueError:
+        #     pass
+
+        # 先释放原来的映射，避免和 REPL 冲突
+        for func in (fm.fpioa.UARTHS_RX, fm.fpioa.UARTHS_TX):
+            try:
+                fm.unregister(func)
+            except ValueError:
+                pass
+
+        try:
+            # fm.register(13, fm.fpioa.UART1_RX, force=True)  # IO4 ← ESP32 TX
+            # fm.register(12, fm.fpioa.UART1_TX, force=True)  # IO5 → ESP32 RX
+
+            fm.register(board_info.PIN4, fm.fpioa.UARTHS_RX, force=True)  # IO4 ← ESP32 TX
+            fm.register(board_info.PIN5, fm.fpioa.UARTHS_TX, force=True)  # IO5 → ESP32 RX
+
+            print("(K210) UART pins registered: RX=IO4, TX=IO5")
+        except:
+            print("(K210) Failed to register UART1 pins")
+            pass
+
+        self.uart = UART(UART.UARTHS, 115200, read_buf_len=4096)
+        print("(K210) UART initialized: 115200 baud")
+
+    # 清空缓冲区
+        if self.uart.any():
+            self.uart.read()
+            print("(K210) Cleared UART buffer")
+
+    def send(self, data):
+        """发送数据到 ESP32"""
+        if isinstance(data, str):
+            data = data.encode('utf-8')
+        self.uart.write(data)
+        # print(f"Sent to ESP32: {data}")
+        print("Sent to ESP32: {}".format(data))
+    
+    def receive(self, timeout_ms=100):
+        """接收 ESP32 发来的数据"""
+        if self.uart.any():
+            data = self.uart.read()
+            if data:
+                try:
+                    return data.decode('utf-8')
+                except:
+                    return data  # 返回原始字节
+        return None
+    
+    def receive_line(self, timeout_ms=1000):
+        """接收一行数据(以 \n 结尾)"""
+        start = time.ticks_ms()
+        buffer = b''
+        
+        while time.ticks_diff(time.ticks_ms(), start) < timeout_ms:
+            if self.uart.any():
+                char = self.uart.read(1)
+                print('(K210) Received char: {}'.format(char))
+                if char:
+                    buffer += char
+                    if char == b'\n':
+                        try:
+                            return buffer.decode('utf-8').strip()
+                        except:
+                            return buffer
+            time.sleep_ms(10)
+        
+        # 超时检查
+        if buffer:
+            result = buffer.decode('utf-8').strip() if buffer else None
+            print("(K210) Timeout with partial data: [{}]".format(result))
+            return result
+        print("(K210) Receive line timeout with no data")
+        return None
+    
+    def start_receive_task(self, callback):
+        """持续接收数据并调用回调函数处理
+        
+        Args:
+            callback: 回调函数,接收一个参数(接收到的数据)
+        """
+        while True:
+            data = self.receive_line()
+            if data:
+                # print(f"Received from ESP32: {data}")
+                print("(K210) Received from ESP32: {}".format(data))
+                callback(data)
+            time.sleep_ms(10)
+```
+
+**ESP32S3端**
+
+`uart_K210.cc`
+```C
+#include "uart_K210.h"
+#include <esp_log.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+
+#define TAG "UART_K210(ESP32)"
+
+void UartK210::Init() {
+    uart_config_t uart_config = {
+        .baud_rate = BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+    };
+    
+    ESP_ERROR_CHECK(uart_param_config(UART_NUM_, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin(UART_NUM_, TX_PIN, RX_PIN, 
+                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM_, BUF_SIZE, 0, 0, NULL, 0));
+    
+    ESP_LOGI(TAG, "UART initialized: TX=%d, RX=%d, Baud=%d", 
+             TX_PIN, RX_PIN, BAUD_RATE);
+}
+
+void UartK210::SendData(const char* data, size_t len) {
+    uart_write_bytes(UART_NUM_, data, len);
+    ESP_LOGI(TAG, "Sent to K210: %.*s (LOG)", len, data);
+}
+
+int UartK210::ReceiveData(uint8_t* buffer, size_t max_len, uint32_t timeout_ms) {
+    return uart_read_bytes(UART_NUM_, buffer, max_len, 
+                          pdMS_TO_TICKS(timeout_ms));
+}
+
+void UartK210::StartReceiveTask() {
+    xTaskCreate([](void* param) {
+        UartK210* uart = static_cast<UartK210*>(param);
+        uint8_t buffer[BUF_SIZE];
+        size_t index = 0;
+        
+        while (1) {
+            uint8_t byte;
+            int len = uart->ReceiveData(&byte, 1, 100);  // 每次读 1 字节
+            
+            if (len > 0) {
+                if (byte == '\n') {
+                    // 收到完整一行
+                    buffer[index] = '\0';
+                    ESP_LOGI(TAG, "Received line: %s", buffer);
+                    index = 0;  // 重置缓冲区
+                } else if (index < BUF_SIZE - 1) {
+                    buffer[index++] = byte;
+                } else {
+                    // 缓冲区满，丢弃
+                    ESP_LOGW(TAG, "Buffer overflow, resetting");
+                    index = 0;
+                }
+            }
+        }
+    }, "uart_rx_task", 4096, this, 5, NULL);
+}
+```
+
+### MCP 的注册
+
+`gimbal_controller.h`
+```C
+void RegisterMcpTools() {
+	auto& mcp_server = McpServer::GetInstance();
+	
+	// 获取云台状态
+	mcp_server.AddTool("gimbal.get_state", 
+		"Get the current state of the gimbal (pitch and roll servo positions)", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("GET_STATE");
+			ESP_LOGI(TAG, "Request gimbal state");
+			return true;
+		});
+
+	// 横滚轴左转
+	mcp_server.AddTool("gimbal.roll.turn_left", 
+		"Turn the roll servo to the left", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("ROLL_LEFT");
+			ESP_LOGI(TAG, "Roll left");
+			return true;
+		});
+
+	// 横滚轴右转
+	mcp_server.AddTool("gimbal.roll.turn_right", 
+		"Turn the roll servo to the right", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("ROLL_RIGHT");
+			ESP_LOGI(TAG, "Roll right");
+			return true;
+		});
+
+	// 俯仰轴上转
+	mcp_server.AddTool("gimbal.pitch.turn_up", 
+		"Turn the pitch servo up", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("PITCH_UP");
+			ESP_LOGI(TAG, "Pitch up");
+			return true;
+		});
+
+	// 俯仰轴下转
+	mcp_server.AddTool("gimbal.pitch.turn_down", 
+		"Turn the pitch servo down", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("PITCH_DOWN");
+			ESP_LOGI(TAG, "Pitch down");
+			return true;
+		});
+
+	// 保持当前位置
+	mcp_server.AddTool("gimbal.hold_position", 
+		"Keep the servo in its current position (stop audio tracking)", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("HOLD_POSITION");
+			ESP_LOGI(TAG, "Hold position");
+			return true;
+		});
+
+	// 回归初始位置
+	mcp_server.AddTool("gimbal.reset", 
+		"Reset the gimbal to initial position", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("RESET");
+			ESP_LOGI(TAG, "Reset to initial position");
+			return true;
+		});
+
+	// 启用音频跟踪
+	mcp_server.AddTool("gimbal.enable_tracking", 
+		"Enable audio source tracking", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("ENABLE_TRACKING");
+			ESP_LOGI(TAG, "Enable audio tracking");
+			return true;
+		});
+
+	// 禁用音频跟踪
+	mcp_server.AddTool("gimbal.disable_tracking", 
+		"Disable audio source tracking", 
+		PropertyList(), 
+		[this](const PropertyList& properties) -> ReturnValue {
+			SendCommand("DISABLE_TRACKING");
+			ESP_LOGI(TAG, "Disable audio tracking");
+			return true;
+		});
+}
+```
+
 ## 介绍
 
 👉 [人类：给 AI 装摄像头 vs AI：当场发现主人三天没洗头【bilibili】](https://www.bilibili.com/video/BV1bpjgzKEhd/)
