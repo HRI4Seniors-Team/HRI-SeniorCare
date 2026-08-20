@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <functional>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -57,6 +58,7 @@ struct AudioServiceCallbacks {
     std::function<void(const std::string&)> on_wake_word_detected;
     std::function<void(bool)> on_vad_change;
     std::function<void(void)> on_audio_testing_queue_full;
+    std::function<void(const int16_t*, size_t)> on_audio_frame;  // SIEVOX: raw PCM for SER
 };
 
 

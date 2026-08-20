@@ -9,15 +9,32 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "./emotion/emotion_upstream.h"
+#include "servo_tracker.h"
 
+#include <algorithm>
 #include <cstring>
+#include <inttypes.h>
 #include <esp_log.h>
+#include <esp_system.h>
 #include <cJSON.h>
 #include <driver/gpio.h>
 #include <arpa/inet.h>
 #include <font_awesome.h>
 
 #define TAG "Application"
+
+#ifndef RESONA_HW_BENCHMARK_LOG
+#define RESONA_HW_BENCHMARK_LOG 1
+#endif
+
+#ifndef RESONA_CLOUD_UPLOAD_URL
+#define RESONA_CLOUD_UPLOAD_URL "https://sievox.cn/resona/emotion/write"
+#endif
+
+#ifndef RESONA_CLOUD_UPLOAD_INTERVAL_MS
+#define RESONA_CLOUD_UPLOAD_INTERVAL_MS 15000
+#endif
 
 
 static const char* const STATE_STRINGS[] = {
@@ -65,6 +82,10 @@ Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (fusion_timer_ != nullptr) {
+        esp_timer_stop(fusion_timer_);
+        esp_timer_delete(fusion_timer_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -131,7 +152,20 @@ void Application::CheckNewVersion(Ota& ota) {
         auto display = board.GetDisplay();
         display->SetStatus(Lang::Strings::CHECKING_NEW_VERSION);
 
-        if (!ota.CheckVersion()) {
+        // SIEVOX: 强制清除NVS中旧OTA URL,使用固件宏定义值
+        {
+            Settings wifi_settings("wifi", true);
+            wifi_settings.SetString("ota_url", "");
+        }
+
+        ota.CheckVersion();
+        ota.MarkCurrentVersionValid();
+        if (!ota.HasActivationCode() && !ota.HasActivationChallenge()) {
+            xEventGroupSetBits(event_group_, MAIN_EVENT_CHECK_NEW_VERSION_DONE);
+            break;
+        }
+
+        if (false) { // 原重试逻辑已禁用
             retry_count++;
             if (retry_count >= MAX_RETRY) {
                 ESP_LOGE(TAG, "Too many retries, exit version check");
@@ -370,6 +404,21 @@ void Application::Start() {
     callbacks.on_vad_change = [this](bool speaking) {
         xEventGroupSetBits(event_group_, MAIN_EVENT_VAD_CHANGE);
     };
+    // SIEVOX: Feed raw PCM into Speech Emotion Recogniser
+    callbacks.on_audio_frame = [this](const int16_t* pcm, size_t samples) {
+        const int64_t start_us = esp_timer_get_time();
+        ser_.FeedAudio(pcm, samples);
+        const int64_t elapsed_us = esp_timer_get_time() - start_us;
+#if RESONA_HW_BENCHMARK_LOG
+        ESP_LOGI(TAG, "HWCSV,SER,%u,%u,%u,%u,%u,%u",
+                 (unsigned)esp_timer_get_time(),
+                 (unsigned)ser_frame_seq_++,
+                 (unsigned)samples,
+                 (unsigned)elapsed_us,
+                 ser_.IsReady() ? 1U : 0U,
+                 (unsigned)esp_get_free_heap_size());
+#endif
+    };
     audio_service_.SetCallbacks(callbacks);
 
     // Start the main event loop task with priority 3
@@ -407,7 +456,7 @@ void Application::Start() {
     } else if (ota.HasWebsocketConfig()) {
         protocol_ = std::make_unique<WebsocketProtocol>();
     } else {
-        ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT");
+        ESP_LOGW(TAG, "No protocol specified in the OTA config, using MQTT fallback");
         protocol_ = std::make_unique<MqttProtocol>();
     }
 
@@ -474,6 +523,8 @@ void Application::Start() {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
+                // SIEVOX: Store STT text for emotion upstream payload
+                last_stt_text_ = text->valuestring;
                 Schedule([this, display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
                 });
@@ -540,33 +591,99 @@ void Application::Start() {
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+
+        // Resona first-link demo mode:
+        // keep only HTTP emotion upload to the cloud dashboard.
+        // Do not auto-open the WebSocket audio channel, because ASR/TTS belongs
+        // to the heavier second-link voice-interaction path.
     }
 
-    ESP_LOGI(TAG, "Initializing UART for K210...");
+    // ==================================================================
+    //  SIEVOX Emotion Pipeline Initialization
+    // ==================================================================
+
+    // ── 1. Initialize UART for MaixCam visual node ───────────────────
+    ESP_LOGI(TAG, "Initializing UART for MaixCam visual node...");
     uart_k210_.Init();
 
-    // application.cc - Application::Start() 中，Init() 之后
+    // ── 2. Initialize Speech Emotion Recogniser (SER) ────────────────
+    // Uses default SERConfig (16000 Hz, 30 ms frames) set in constructor.
+    // Future: ser_.SetConfig(custom_cfg) to override; model path for TFLite.
+
+    if (ser_.Init() != ESP_OK) {
+        ESP_LOGE(TAG, "SER init failed!");
+    }
+
+    // ── 3. Configure D-S Fusion Engine ──────────────────────────────
+    DSFusionConfig fusion_cfg;
+    fusion_cfg.conflict_threshold     = 0.85f;
+    fusion_cfg.vision_confidence      = 0.75f;
+    fusion_cfg.audio_confidence       = 0.70f;
+    fusion_cfg.vision_stale_timeout_ms = 2000;
+    fusion_cfg.audio_stale_timeout_ms  = 1500;
+    fusion_cfg.vision_reliability     = 0.6f;
+    fusion_cfg.audio_reliability      = 0.4f;
+    fusion_engine_.Reconfigure(fusion_cfg);
+
+    // ── 4. Register Vision callback on UART ─────────────────────────
+    // When a JSON emotion packet arrives from MaixCam, feed it into the
+    // fusion engine after CRC validation.
+    uart_k210_.SetVisionCallback(
+        [this](const VisionEmotionPacket& pkt) {
+            // Only feed valid, CRC-checked packets
+            if (!pkt.crc_valid) {
+                ESP_LOGW(TAG, "Dropping CRC-invalid vision packet seq=%u", pkt.seq);
+                return;
+            }
+
+            // Store raw vision probs for upstream explainability
+            last_vision_raw_ = pkt.emo_probs;
+
+            // Feed into fusion engine (thread-safe)
+            fusion_engine_.UpdateVision(pkt.emo_probs, pkt.face_detected);
+
+            // Feed the same validated vision packet to the pan servo tracker.
+            ServoTrackerOnVisionPacket(pkt);
+        }
+    );
+
+    // ── 5. Create periodic fusion timer (1 Hz) ──────────────────────
+    // The fusion engine runs on a timer rather than being tied to either
+    // sensor's update rate.  This decouples the two asynchronous streams.
+    esp_timer_create_args_t fusion_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_FUSION_TICK);
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "fusion_timer",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&fusion_timer_args, &fusion_timer_);
+    esp_timer_start_periodic(fusion_timer_, 1000000);  // 1 second
+
+    // ── 6. UART heartbeat task (keep-alive query to MaixCam) ────────
     xTaskCreate([](void* arg) {
-        auto& uart = Application::GetInstance().GetUartK210();
+        auto& app = Application::GetInstance();
         TickType_t start = xTaskGetTickCount();
 
         while (true) {
-            uart.SendData("To k210 PING\n", 13);
+            app.GetUartK210().SendCommand("GET_STATE");
             vTaskDelay(pdMS_TO_TICKS(
                 (xTaskGetTickCount() - start) < pdMS_TO_TICKS(10000) ? 1000 : 5000
             ));
         }
-    }, "uart_k210_heartbeat", 2048, nullptr, 3, nullptr);
+    }, "uart_vision_heartbeat", 2048, nullptr, 3, nullptr);
 
-    // vTaskDelay(pdMS_TO_TICKS(500));
-    ESP_LOGI(TAG, "(ESP32) Starting UART receive task...");
-    
-    // 关键：先开口说话，且要以'\n'结尾，K210按行解析
-    const char* cmd = "GET_STATE\n";
-    uart_k210_.SendData(cmd, strlen(cmd));
-    ESP_LOGI(TAG, "Sent to K210: %s", cmd);
+    // ── 7. Start UART receive task ──────────────────────────────────
+    ESP_LOGI(TAG, "Starting UART receive task...");
+    uart_k210_.StartReceiveTask();
 
-    uart_k210_.StartReceiveTask(); // 启动持续接收数据的任务
+    // One-shot SG90 safety test before enabling closed-loop face tracking.
+    InitializeServoSelfTest();
+
+    ESP_LOGI(TAG, "SIEVOX Emotion pipeline initialised: SER + D-S Fusion + Upstream");
 }
 
 // Add a async task to MainLoop
@@ -588,6 +705,7 @@ void Application::MainEventLoop() {
             MAIN_EVENT_WAKE_WORD_DETECTED |
             MAIN_EVENT_VAD_CHANGE |
             MAIN_EVENT_CLOCK_TICK |
+            MAIN_EVENT_FUSION_TICK |
             MAIN_EVENT_ERROR, pdTRUE, pdFALSE, portMAX_DELAY);
 
         if (bits & MAIN_EVENT_ERROR) {
@@ -596,9 +714,25 @@ void Application::MainEventLoop() {
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
+            static uint32_t resona_audio_queue_packets = 0;
+            static uint32_t resona_audio_sent_packets = 0;
+            static uint32_t resona_audio_send_failures = 0;
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                resona_audio_queue_packets++;
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
+                    resona_audio_send_failures++;
+                    ESP_LOGW(TAG, "Resona audio send failed: queued=%lu sent=%lu failures=%lu",
+                        (unsigned long)resona_audio_queue_packets,
+                        (unsigned long)resona_audio_sent_packets,
+                        (unsigned long)resona_audio_send_failures);
                     break;
+                }
+                resona_audio_sent_packets++;
+                if ((resona_audio_sent_packets % 50) == 0) {
+                    ESP_LOGI(TAG, "Resona audio packets: queued=%lu sent=%lu failures=%lu",
+                        (unsigned long)resona_audio_queue_packets,
+                        (unsigned long)resona_audio_sent_packets,
+                        (unsigned long)resona_audio_send_failures);
                 }
             }
         }
@@ -611,6 +745,95 @@ void Application::MainEventLoop() {
             if (device_state_ == kDeviceStateListening) {
                 auto led = Board::GetInstance().GetLed();
                 led->OnStateChanged();
+            }
+
+            // ── SIEVOX: Reset SER on speech onset ──────────────────
+            bool is_speaking = audio_service_.IsVoiceDetected();
+            if (is_speaking) {
+                ser_.Reset();
+            } else {
+                // Speech ended — trigger final fusion with latest audio
+                auto audio_probs = ser_.GetEmotionProbs();
+                fusion_engine_.UpdateAudio(audio_probs);
+            }
+        }
+
+        if (bits & MAIN_EVENT_FUSION_TICK) {
+            // ── SIEVOX: Periodic D-S Fusion ─────────────────────────
+            // Feed latest audio emotion into fusion engine
+            if (ser_.IsReady()) {
+                auto audio_probs = ser_.GetEmotionProbs();
+                fusion_engine_.UpdateAudio(audio_probs);
+            }
+
+            const int64_t fusion_start_us = esp_timer_get_time();
+            // Run D-S fusion
+            FusionResult result = fusion_engine_.Fuse();
+            const int64_t fusion_elapsed_us = esp_timer_get_time() - fusion_start_us;
+
+#if RESONA_HW_BENCHMARK_LOG
+            ESP_LOGI(TAG, "HWCSV,FUSION,%u,%u,%u,%u,%u,%u,%.6f,%.6f,%u,%.6f",
+                     (unsigned)esp_timer_get_time(),
+                     (unsigned)fusion_seq_++,
+                     (unsigned)fusion_elapsed_us,
+                     result.high_conflict ? 1U : 0U,
+                     (unsigned)esp_get_free_heap_size(),
+                     ser_.IsReady() ? 1U : 0U,
+                     result.conflict_raw,
+                     result.conflict,
+                     (unsigned)result.dominant,
+                     result.dominant_score);
+#endif
+
+            // Log the result
+            ESP_LOGI(TAG, "FUSED EMOTION: %s (%.1f%%) C=%.3f K=%.3f%s",
+                     DSFusionEngine::EmotionLabel(result.dominant),
+                     result.dominant_score * 100.0f,
+                     result.conflict,
+                     result.conflict_raw,
+                     result.high_conflict ? " [HIGH CONFLICT -- possible masked distress]" : "");
+
+            // Update display with the fused emotion (带防抖+动画)
+            auto display = Board::GetInstance().GetDisplay();
+            display->UpdateEmotion(DSFusionEngine::EmotionLabel(result.dominant),
+                                   (uint32_t)(esp_timer_get_time() / 1000));
+
+            // Build and send upstream payload to Raspberry Pi
+            auto audio_raw = ser_.GetEmotionProbs();
+
+            std::string payload = BuildEmotionPayload(
+                result,
+                last_vision_raw_,
+                audio_raw,
+                last_stt_text_,
+                "SIEVOX-01"
+            );
+
+            ESP_LOGI(TAG,
+                     "MCP_EMOTION_TX dominant=%s score=%.3f conflict=%.3f "
+                     "v=[%.2f,%.2f,%.2f,%.2f] a=[%.2f,%.2f,%.2f,%.2f] intent_len=%u",
+                     DSFusionEngine::EmotionLabel(result.dominant),
+                     result.dominant_score,
+                     result.conflict,
+                     last_vision_raw_[0], last_vision_raw_[1],
+                     last_vision_raw_[2], last_vision_raw_[3],
+                     audio_raw[0], audio_raw[1], audio_raw[2], audio_raw[3],
+                     static_cast<unsigned>(last_stt_text_.size()));
+
+            // Send via MCP (custom message) to upstream host
+            SendMcpMessage(payload);
+            UploadEmotionToCloud(result);
+
+            ESP_LOGD(TAG, "Upstream payload: %s", payload.c_str());
+
+            // ── Special handling: high-conflict alert ──────────────────
+            // When face and voice disagree strongly, record a server-side warning
+            // without interrupting the current speech output.
+            if (result.high_conflict) {
+                ESP_LOGW(TAG, "WARNING: MULTIMODAL CONFLICT DETECTED -- "
+                         "possible masked emotional state. "
+                         "Uploading warning record to cloud.");
+                UploadEmotionToCloud(result, last_vision_raw_, audio_raw, last_stt_text_, true);
             }
         }
 
@@ -711,17 +934,23 @@ void Application::SetDeviceState(DeviceState state) {
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
             display->SetEmotion("neutral");
+            display->SetListening(false);
+            display->SetSpeaking(false);
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
+            display->SetListening(false);
+            display->SetSpeaking(false);
             display->SetChatMessage("system", "");
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            display->SetListening(true);
+            display->SetSpeaking(false);
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
@@ -733,6 +962,8 @@ void Application::SetDeviceState(DeviceState state) {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
+            display->SetListening(false);
+            display->SetSpeaking(true);
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
@@ -863,6 +1094,149 @@ void Application::SendMcpMessage(const std::string& payload) {
         Schedule([this, payload = std::move(payload)]() {
             protocol_->SendMcpMessage(payload);
         });
+    }
+}
+
+void Application::UploadEmotionToCloud(const FusionResult& result) {
+    const std::array<float, kNumEmotions> empty = {0};
+    UploadEmotionToCloud(result, empty, empty, "", false);
+}
+
+void Application::UploadEmotionToCloud(
+    const FusionResult& result,
+    const std::array<float, kNumEmotions>& vision_raw,
+    const std::array<float, kNumEmotions>& audio_raw,
+    const std::string& intent_text,
+    bool warning_record) {
+    static int64_t last_upload_ms = 0;
+    static int64_t last_warning_upload_ms = 0;
+    static volatile bool upload_in_flight = false;
+    static volatile bool warning_upload_in_flight = false;
+
+    const int64_t now_ms = esp_timer_get_time() / 1000;
+    if (warning_record) {
+        if (now_ms - last_warning_upload_ms < 8000 || warning_upload_in_flight) {
+            return;
+        }
+        last_warning_upload_ms = now_ms;
+    } else {
+        if (now_ms - last_upload_ms < RESONA_CLOUD_UPLOAD_INTERVAL_MS || upload_in_flight) {
+            return;
+        }
+        last_upload_ms = now_ms;
+    }
+
+    cJSON* root = cJSON_CreateObject();
+    if (!root) {
+        ESP_LOGW(TAG, "%s upload skipped: failed to create JSON", warning_record ? "Warning" : "Cloud");
+        return;
+    }
+
+    cJSON_AddStringToObject(root, "device_id", SystemInfo::GetMacAddress().c_str());
+    cJSON_AddStringToObject(root, "dominant", DSFusionEngine::EmotionLabel(result.dominant));
+    cJSON_AddNumberToObject(root, "score", result.dominant_score);
+    cJSON_AddNumberToObject(root, "conflict", result.conflict);
+    cJSON_AddBoolToObject(root, "high_conflict", result.high_conflict);
+    cJSON_AddNumberToObject(root, "vision_reliability", 0.60);
+    cJSON_AddNumberToObject(root, "audio_reliability", 0.40);
+
+    cJSON* belief = cJSON_AddArrayToObject(root, "belief");
+    for (size_t i = 0; i < kNumEmotions; ++i) {
+        cJSON_AddItemToArray(belief, cJSON_CreateNumber(result.belief[i]));
+    }
+
+    if (warning_record) {
+        cJSON_AddStringToObject(root, "record_type", "emotion_warning");
+        cJSON_AddStringToObject(root, "warning_level", "high_conflict");
+        cJSON_AddStringToObject(root, "warning_message",
+                                "Detected possible hidden distress -- face and voice show conflicting emotions.");
+
+        cJSON* vision = cJSON_AddArrayToObject(root, "vision");
+        for (size_t i = 0; i < kNumEmotions; ++i) {
+            cJSON_AddItemToArray(vision, cJSON_CreateNumber(vision_raw[i]));
+        }
+
+        cJSON* audio = cJSON_AddArrayToObject(root, "audio");
+        for (size_t i = 0; i < kNumEmotions; ++i) {
+            cJSON_AddItemToArray(audio, cJSON_CreateNumber(audio_raw[i]));
+        }
+
+        cJSON_AddStringToObject(root, "dialog_context",
+                                "High-conflict emotion record. Store this in the emotion warning list and do not interrupt speech output.");
+        if (!intent_text.empty()) {
+            cJSON_AddStringToObject(root, "intent", intent_text.c_str());
+        }
+    }
+
+    char* json_str = cJSON_PrintUnformatted(root);
+    std::string* payload = new std::string(json_str ? json_str : "{}");
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+
+    volatile bool* in_flight = warning_record ? &warning_upload_in_flight : &upload_in_flight;
+    *in_flight = true;
+    const char* task_name = warning_record ? "resona_warning_upload" : "resona_cloud_upload";
+    const char* log_prefix = warning_record ? "Warning upload" : "Cloud upload";
+
+    struct UploadContext {
+        std::string* body;
+        volatile bool* in_flight;
+        const char* log_prefix;
+    };
+
+    BaseType_t ok = xTaskCreate(
+        [](void* arg) {
+            std::unique_ptr<UploadContext> ctx(static_cast<UploadContext*>(arg));
+            std::unique_ptr<std::string> body(ctx->body);
+            auto finish = [&ctx]() {
+                *(ctx->in_flight) = false;
+                vTaskDelete(nullptr);
+            };
+
+            auto network = Board::GetInstance().GetNetwork();
+            if (!network) {
+                ESP_LOGW(TAG, "%s skipped: network unavailable", ctx->log_prefix);
+                finish();
+            }
+
+            auto http = network->CreateHttp(1);
+            if (!http) {
+                ESP_LOGW(TAG, "%s skipped: HTTP client unavailable", ctx->log_prefix);
+                finish();
+            }
+
+            http->SetHeader("Content-Type", "application/json");
+            http->SetHeader("Device-Id", SystemInfo::GetMacAddress().c_str());
+            http->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
+            http->SetContent(std::move(*body));
+
+            if (!http->Open("POST", RESONA_CLOUD_UPLOAD_URL)) {
+                ESP_LOGW(TAG, "%s failed: cannot connect to %s", ctx->log_prefix, RESONA_CLOUD_UPLOAD_URL);
+                finish();
+            }
+
+            const int status = http->GetStatusCode();
+            std::string response = http->ReadAll();
+            http->Close();
+
+            if (status == 200) {
+                ESP_LOGI(TAG, "%s OK: %s", ctx->log_prefix, response.c_str());
+            } else {
+                ESP_LOGW(TAG, "%s failed: HTTP %d %s", ctx->log_prefix, status, response.c_str());
+            }
+
+            finish();
+        },
+        task_name,
+        8192,
+        new UploadContext{payload, in_flight, log_prefix},
+        2,
+        nullptr);
+
+    if (ok != pdPASS) {
+        delete payload;
+        *in_flight = false;
+        ESP_LOGW(TAG, "%s skipped: failed to create task", warning_record ? "Warning upload" : "Cloud upload");
     }
 }
 

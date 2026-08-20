@@ -32,25 +32,30 @@
 #define BOOT_BUTTON_GPIO        GPIO_NUM_0
 #define TOUCH_BUTTON_GPIO       GPIO_NUM_47
 #define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_40
-#define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_39
+#define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_17
 
-#define DISPLAY_SDA_PIN GPIO_NUM_41
-#define DISPLAY_SCL_PIN GPIO_NUM_42
-#define DISPLAY_WIDTH   128
+// ── Display: 1.54" TFT, SPI, ST7789 (240x240) ──────────────────────
+// 原 I²C SSD1306 已换成 SPI ST7789。以下 6 个引脚均为无冲突空闲 GPIO,
+// 避开音频(4-7/15-16)、K210 UART(17-18)、LED(48)、灯(10)、boot(0)。
+#define DISPLAY_MOSI_PIN      GPIO_NUM_11   // 屏 SDA/DIN
+#define DISPLAY_CLK_PIN       GPIO_NUM_12   // 屏 SCL/SCK
+#define DISPLAY_DC_PIN        GPIO_NUM_13   // 数据/命令
+#define DISPLAY_RST_PIN       GPIO_NUM_14   // 复位
+#define DISPLAY_CS_PIN        GPIO_NUM_21   // 片选
+#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_2    // 背光 BL
 
-#if CONFIG_OLED_SSD1306_128X32
-#define DISPLAY_HEIGHT  32
-#elif CONFIG_OLED_SSD1306_128X64
-#define DISPLAY_HEIGHT  64
-#elif CONFIG_OLED_SH1106_128X64
-#define DISPLAY_HEIGHT  64
-#define SH1106
-#else
-#error "未选择 OLED 屏幕类型"
-#endif
-
-#define DISPLAY_MIRROR_X true
-#define DISPLAY_MIRROR_Y true
+#define LCD_TYPE_ST7789_SERIAL
+#define DISPLAY_WIDTH   240
+#define DISPLAY_HEIGHT  240
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
+#define DISPLAY_SWAP_XY false
+#define DISPLAY_INVERT_COLOR true
+#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
+#define DISPLAY_OFFSET_X  0
+#define DISPLAY_OFFSET_Y  0
+#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
+#define DISPLAY_SPI_MODE 0
 
 
 // A MCP Test: Control a lamp

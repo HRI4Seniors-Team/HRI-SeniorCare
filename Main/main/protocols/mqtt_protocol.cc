@@ -107,11 +107,22 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
             ParseServerHello(root);
         } else if (strcmp(type->valuestring, "goodbye") == 0) {
             auto session_id = cJSON_GetObjectItem(root, "session_id");
-            ESP_LOGI(TAG, "Received goodbye message, session_id: %s", session_id ? session_id->valuestring : "null");
-            if (session_id == nullptr || session_id_ == session_id->valuestring) {
+            const char* remote_session_id = cJSON_IsString(session_id) ? session_id->valuestring : nullptr;
+
+            if (remote_session_id == nullptr || remote_session_id[0] == '\0') {
+                static uint32_t empty_goodbye_count = 0;
+                empty_goodbye_count++;
+                if ((empty_goodbye_count % 30) == 1) {
+                    ESP_LOGD(TAG, "Ignored empty goodbye message, count=%lu",
+                             (unsigned long)empty_goodbye_count);
+                }
+            } else if (session_id_ == remote_session_id) {
+                ESP_LOGI(TAG, "Received goodbye message, session_id: %s", remote_session_id);
                 Application::GetInstance().Schedule([this]() {
                     CloseAudioChannel();
                 });
+            } else {
+                ESP_LOGD(TAG, "Ignored goodbye for another session: %s", remote_session_id);
             }
         } else if (on_incoming_json_ != nullptr) {
             on_incoming_json_(root);

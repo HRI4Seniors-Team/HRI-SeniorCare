@@ -40,6 +40,17 @@ void Display::SetEmotion(const char* emotion) {
     ESP_LOGW(TAG, "SetEmotion: %s", emotion);
 }
 
+void Display::UpdateEmotion(const char* emotion, uint32_t now_ms) {
+    // 默认实现:直接调用 SetEmotion(LcdDisplay 会覆盖为带防抖+动画的版本)
+    SetEmotion(emotion);
+}
+
+void Display::SetListening(bool listening) {
+}
+
+void Display::SetSpeaking(bool speaking) {
+}
+
 void Display::SetChatMessage(const char* role, const char* content) {
     ESP_LOGW(TAG, "Role:%s", role);
     ESP_LOGW(TAG, "     %s", content);

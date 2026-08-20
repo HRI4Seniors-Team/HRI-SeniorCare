@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include <unordered_map>
 #include <string>
+#include <cstdlib>
 
 #define TAG "EmojiCollection"
 
@@ -18,6 +19,18 @@ const LvglImage* EmojiCollection::GetEmojiImage(const char* name) {
 
     ESP_LOGW(TAG, "Emoji not found: %s", name);
     return nullptr;
+}
+
+void EmojiCollection::AddEmotionGroup(const std::string& emotion,
+                                       const std::vector<const char*>& names) {
+    emotion_groups_[emotion] = {names, -1, 0};
+}
+
+const char* EmojiCollection::GetEmotionEmoji(const char* emotion, uint32_t now_ms) {
+    auto it = emotion_groups_.find(emotion);
+    if (it == emotion_groups_.end()) return emotion; // 回退到原名
+    // 始终返回组内第一个(主表情),表情随情绪变,不随机轮换
+    return it->second.names[0];
 }
 
 EmojiCollection::~EmojiCollection() {
@@ -72,6 +85,12 @@ Twemoji32::Twemoji32() {
     AddEmoji("sleepy", new LvglSourceImage(&emoji_1f634_32));
     AddEmoji("silly", new LvglSourceImage(&emoji_1f61c_32));
     AddEmoji("confused", new LvglSourceImage(&emoji_1f644_32));
+
+    // 情绪表情组(每3秒随机轮换变体)
+    AddEmotionGroup("happy",   {"happy","laughing","funny","winking","cool"});
+    AddEmotionGroup("sad",     {"sad","crying","confused","sleepy"});
+    AddEmotionGroup("neutral", {"neutral","relaxed","delicious","silly","confident"});
+    AddEmotionGroup("anger",   {"angry","shocked","embarrassed","thinking"});
 }
 
 
@@ -120,4 +139,10 @@ Twemoji64::Twemoji64() {
     AddEmoji("sleepy", new LvglSourceImage(&emoji_1f634_64));
     AddEmoji("silly", new LvglSourceImage(&emoji_1f61c_64));
     AddEmoji("confused", new LvglSourceImage(&emoji_1f644_64));
+
+    // 情绪表情组(每3秒随机轮换变体)
+    AddEmotionGroup("happy",   {"happy","laughing","funny","winking","cool"});
+    AddEmotionGroup("sad",     {"sad","crying","confused","sleepy"});
+    AddEmotionGroup("neutral", {"neutral","relaxed","delicious","silly","confident"});
+    AddEmotionGroup("anger",   {"angry","shocked","embarrassed","thinking"});
 }

@@ -1,4 +1,5 @@
 #include "lcd_display.h"
+#include "cute_face_view.h"
 #include "gif/lvgl_gif.h"
 #include "settings.h"
 #include "lvgl_theme.h"
@@ -20,6 +21,7 @@
 LV_FONT_DECLARE(BUILTIN_TEXT_FONT);
 LV_FONT_DECLARE(BUILTIN_ICON_FONT);
 LV_FONT_DECLARE(font_awesome_30_4);
+LV_FONT_DECLARE(font_puhui_20_4);
 
 void LcdDisplay::InitializeLcdThemes() {
     auto text_font = std::make_shared<LvglBuiltInFont>(&BUILTIN_TEXT_FONT);
@@ -55,6 +57,11 @@ void LcdDisplay::InitializeLcdThemes() {
     dark_theme->set_text_font(text_font);
     dark_theme->set_icon_font(icon_font);
     dark_theme->set_large_icon_font(large_icon_font);
+
+    // 默认彩色表情集(64px Twemoji)
+    auto twemoji = std::make_shared<Twemoji64>();
+    light_theme->set_emoji_collection(twemoji);
+    dark_theme->set_emoji_collection(twemoji);
 
     auto& theme_manager = LvglThemeManager::GetInstance();
     theme_manager.RegisterTheme("light", light_theme);
@@ -374,10 +381,31 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_style_text_color(status_bar_, lvgl_theme->text_color(), 0);
     
     /* Content - Chat area */
+    /* Emoji 区域: 在状态栏下方占据大部分空间 */
+    emoji_box_ = lv_obj_create(container_);
+    lv_obj_set_size(emoji_box_, LV_HOR_RES, LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(emoji_box_, 3);  // 占 3/4 空间
+    lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(emoji_box_, 0, 0);
+    lv_obj_set_style_border_width(emoji_box_, 0, 0);
+    lv_obj_set_flex_flow(emoji_box_, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(emoji_box_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    cute_face_view_ = std::make_unique<CuteFaceView>(emoji_box_);
+#endif
+
+    emoji_image_ = lv_img_create(emoji_box_);
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_IGNORE_LAYOUT);
+#endif
+
+    /* Chat 区域 */
     content_ = lv_obj_create(container_);
     lv_obj_set_style_radius(content_, 0, 0);
     lv_obj_set_width(content_, LV_HOR_RES);
-    lv_obj_set_flex_grow(content_, 1);
+    lv_obj_set_flex_grow(content_, 1);  // 占 1/4 空间
     lv_obj_set_style_pad_all(content_, lvgl_theme->spacing(4), 0);
     lv_obj_set_style_border_width(content_, 0, 0);
     lv_obj_set_style_bg_color(content_, lvgl_theme->chat_background_color(), 0); // Background for chat area
@@ -449,15 +477,15 @@ void LcdDisplay::SetupUI() {
     lv_obj_center(low_battery_label_);
     lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
 
-    emoji_image_ = lv_img_create(screen);
-    lv_obj_align(emoji_image_, LV_ALIGN_TOP_MID, 0, text_font->line_height + lvgl_theme->spacing(8));
-
-    // Display AI logo while booting
-    emoji_label_ = lv_label_create(screen);
-    lv_obj_center(emoji_label_);
+    // 启动画面文字(初始化完成后隐藏)
+    emoji_label_ = lv_label_create(emoji_box_);
     lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(emoji_label_, FONT_AWESOME_MICROCHIP_AI);
+    lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_IGNORE_LAYOUT);
+#endif
 }
 #if CONFIG_IDF_TARGET_ESP32P4
 #define  MAX_MESSAGES 40
@@ -793,19 +821,33 @@ void LcdDisplay::SetupUI() {
     lv_obj_set_flex_align(content_, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_SPACE_EVENLY); // 子对象居中对齐，等距分布
 
     emoji_box_ = lv_obj_create(content_);
-    lv_obj_set_size(emoji_box_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_TRANSP, 0);
+    lv_obj_set_size(emoji_box_, 210, 210);         // 大号圆形表情框
+    lv_obj_set_style_bg_opa(emoji_box_, LV_OPA_TRANSP, 0); // 透明底
+    lv_obj_set_style_radius(emoji_box_, 105, 0);   // 正圆(半宽)
     lv_obj_set_style_pad_all(emoji_box_, 0, 0);
     lv_obj_set_style_border_width(emoji_box_, 0, 0);
+    lv_obj_set_style_clip_corner(emoji_box_, true, 0); // 裁剪子内容为圆形
+
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    cute_face_view_ = std::make_unique<CuteFaceView>(emoji_box_);
+#endif
 
     emoji_label_ = lv_label_create(emoji_box_);
     lv_obj_set_style_text_font(emoji_label_, large_icon_font, 0);
     lv_obj_set_style_text_color(emoji_label_, lvgl_theme->text_color(), 0);
     lv_label_set_text(emoji_label_, FONT_AWESOME_MICROCHIP_AI);
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_IGNORE_LAYOUT);
+#endif
 
     emoji_image_ = lv_img_create(emoji_box_);
+    lv_obj_set_size(emoji_image_, 170, 170);        // 表情170×170
     lv_obj_center(emoji_image_);
     lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_IGNORE_LAYOUT);
+#endif
 
     preview_image_ = lv_image_create(content_);
     lv_obj_set_size(preview_image_, width_ / 2, height_ / 2);
@@ -814,10 +856,12 @@ void LcdDisplay::SetupUI() {
 
     chat_message_label_ = lv_label_create(content_);
     lv_label_set_text(chat_message_label_, "");
-    lv_obj_set_width(chat_message_label_, width_ * 0.9); // 限制宽度为屏幕宽度的 90%
-    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP); // 设置为自动换行模式
-    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0); // 设置文本居中对齐
+    lv_obj_set_width(chat_message_label_, width_ * 0.9);
+    lv_label_set_long_mode(chat_message_label_, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(chat_message_label_, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(chat_message_label_, lvgl_theme->text_color(), 0);
+    lv_obj_set_style_text_font(chat_message_label_, &font_puhui_20_4, 0); // 20px全字库
+    lv_obj_set_style_margin_top(chat_message_label_, -50, 0);                     // 紧贴表情下方
 
     /* Status bar */
     network_label_ = lv_label_create(status_bar_);
@@ -916,6 +960,21 @@ void LcdDisplay::SetEmotion(const char* emotion) {
         gif_controller_->Stop();
         gif_controller_.reset();
     }
+
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    if (cute_face_view_ != nullptr) {
+        DisplayLockGuard lock(this);
+        if (emoji_image_ != nullptr) {
+            lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (emoji_label_ != nullptr) {
+            lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+        cute_face_view_->UpdateEmotion(emotion, static_cast<uint32_t>(esp_timer_get_time() / 1000ULL));
+        cute_face_view_->SetVisible(true);
+        return;
+    }
+#endif
     
     if (emoji_image_ == nullptr) {
         return;
@@ -976,6 +1035,119 @@ void LcdDisplay::SetEmotion(const char* emotion) {
         lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
     }
 #endif
+}
+
+void LcdDisplay::SetListening(bool listening) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    if (cute_face_view_ != nullptr) {
+        DisplayLockGuard lock(this);
+        cute_face_view_->SetListening(listening);
+        return;
+    }
+#endif
+    Display::SetListening(listening);
+}
+
+void LcdDisplay::SetSpeaking(bool speaking) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    if (cute_face_view_ != nullptr) {
+        DisplayLockGuard lock(this);
+        cute_face_view_->SetSpeaking(speaking);
+        return;
+    }
+#endif
+    Display::SetSpeaking(speaking);
+}
+
+// ── SIEVOX 动态情绪表情 ─────────────────────────────────────────
+void LcdDisplay::_set_emoji_image(const lv_image_dsc_t* dsc) {
+    if (emoji_image_ == nullptr) return;
+    lv_image_set_src(emoji_image_, dsc);
+    lv_obj_center(emoji_image_);
+    lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+}
+
+void LcdDisplay::_animate_emoji_switch() {
+    if (emoji_image_ == nullptr) return;
+    // 淡入: opacity 0→255, 200ms, 不改变大小
+    lv_anim_t a;
+    lv_anim_init(&a);
+    lv_anim_set_var(&a, emoji_image_);
+    lv_anim_set_exec_cb(&a, [](void* var, int32_t v) {
+        lv_obj_set_style_opa((lv_obj_t*)var, (uint8_t)v, 0);
+    });
+    lv_anim_set_values(&a, 0, 255);
+    lv_anim_set_time(&a, 200);
+    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_start(&a);
+}
+
+void LcdDisplay::UpdateEmotion(const char* emotion, uint32_t now_ms) {
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    if (cute_face_view_ != nullptr) {
+        DisplayLockGuard lock(this);
+        if (emoji_image_ != nullptr) {
+            lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (emoji_label_ != nullptr) {
+            lv_obj_add_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+        cute_face_view_->UpdateEmotion(emotion, now_ms);
+        cute_face_view_->SetVisible(true);
+        return;
+    }
+#endif
+    if (emoji_image_ == nullptr || emotion == nullptr) return;
+
+    // ── 防抖: 连续 kEmotionStableThreshold 次相同情绪才切换 ──
+    std::string label(emotion);
+    if (label == pending_emotion_) {
+        emotion_stable_count_++;
+    } else {
+        pending_emotion_ = label;
+        emotion_stable_count_ = 1;
+    }
+
+    if (emotion_stable_count_ < kEmotionStableThreshold) return;
+
+    // ── 同情绪内变体轮换 ──
+    auto theme = static_cast<LvglTheme*>(current_theme_);
+    auto col = theme ? theme->emoji_collection() : nullptr;
+    if (col && now_ms - last_emotion_ts_ms_ < kVarietySwitchMs && label == current_emotion_) {
+        return; // 同情绪且未到轮换时间，不变
+    }
+    const char* emoji_name = col ? col->GetEmotionEmoji(label.c_str(), now_ms) : label.c_str();
+
+    // ── 切换表情 ──
+    if (label != current_emotion_) {
+        // 情绪变了: 停止旧 GIF, 缩小→换图→放大
+        if (gif_controller_) gif_controller_->Stop();
+        gif_controller_.reset();
+        current_emotion_ = label;
+        last_emotion_ts_ms_ = now_ms;
+        emotion_stable_count_ = 0;
+        pending_emotion_.clear();
+    }
+
+    auto image = col ? col->GetEmojiImage(emoji_name) : nullptr;
+    if (image == nullptr) {
+        const char* utf8 = font_awesome_get_utf8(emoji_name);
+        if (utf8 && emoji_label_) {
+            DisplayLockGuard lock(this);
+            lv_label_set_text(emoji_label_, utf8);
+            lv_obj_add_flag(emoji_image_, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_remove_flag(emoji_label_, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
+    {
+        DisplayLockGuard lock(this);
+        _set_emoji_image(image->image_dsc());
+        _animate_emoji_switch();
+    }
+    last_emotion_ts_ms_ = now_ms;
 }
 
 void LcdDisplay::SetTheme(Theme* theme) {

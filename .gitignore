@@ -20,3 +20,15 @@ mmap_generate_*.h
 
 .obsidian
 Main/res
+
+# 误拷入的 esp-idf 框架副本(仅含 .git),真正的 IDF 在 C:\Users\25453\esp-idf
+Main/esp-idf/
+
+# 本地构建、硬件测试与临时分析产物
+Main/build*/
+Main/.scratch*
+Main/hardware_logs/
+Main/backup*/
+*.log
+*.bak*
+__pycache__/

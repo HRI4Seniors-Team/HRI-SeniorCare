@@ -243,6 +243,10 @@ void AudioService::AudioInputTask() {
             int samples = audio_processor_->GetFeedSize();
             if (samples > 0) {
                 if (ReadAudioData(data, 16000, samples)) {
+                    // SIEVOX: Feed raw PCM to Speech Emotion Recogniser
+                    if (callbacks_.on_audio_frame) {
+                        callbacks_.on_audio_frame(data.data(), data.size());
+                    }
                     audio_processor_->Feed(std::move(data));
                     continue;
                 }

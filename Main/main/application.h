@@ -17,6 +17,8 @@
 #include "device_state_event.h"
 
 #include "./uart_k210/uart_k210.h"
+#include "./emotion/speech_emotion.h"
+#include "./emotion/ds_fusion_engine.h"
 
 
 #define MAIN_EVENT_SCHEDULE (1 << 0)
@@ -26,6 +28,7 @@
 #define MAIN_EVENT_ERROR (1 << 4)
 #define MAIN_EVENT_CHECK_NEW_VERSION_DONE (1 << 5)
 #define MAIN_EVENT_CLOCK_TICK (1 << 6)
+#define MAIN_EVENT_FUSION_TICK (1 << 7)
 
 
 enum AecMode {
@@ -61,12 +64,21 @@ public:
     bool UpgradeFirmware(Ota& ota, const std::string& url = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void UploadEmotionToCloud(const FusionResult& result);
+    void UploadEmotionToCloud(
+        const FusionResult& result,
+        const std::array<float, kNumEmotions>& vision_raw,
+        const std::array<float, kNumEmotions>& audio_raw,
+        const std::string& intent_text,
+        bool warning_record);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
 
     UartK210& GetUartK210() { return uart_k210_; }
+    SpeechEmotionAnalyser& GetSER() { return ser_; }
+    DSFusionEngine& GetDSFusionEngine() { return fusion_engine_; }
 
 private:
     Application();
@@ -90,6 +102,15 @@ private:
     TaskHandle_t main_event_loop_task_handle_ = nullptr;
 
     UartK210 uart_k210_;
+
+    // ── Emotion recognition pipeline (SIEVOX) ──────────────────────────
+    SpeechEmotionAnalyser ser_;
+    DSFusionEngine         fusion_engine_;
+    std::array<float, kNumEmotions> last_vision_raw_ = {0};
+    std::string            last_stt_text_;
+    esp_timer_handle_t     fusion_timer_ = nullptr;
+    uint32_t               ser_frame_seq_ = 0;
+    uint32_t               fusion_seq_ = 0;
 
     void OnWakeWordDetected();
     void CheckNewVersion(Ota& ota);

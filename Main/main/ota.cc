@@ -15,6 +15,8 @@
 #endif
 
 #include <cstring>
+#undef CONFIG_OTA_URL
+#define CONFIG_OTA_URL "http://192.168.43.5:8003/xiaozhi/ota/"
 #include <vector>
 #include <sstream>
 #include <algorithm>
@@ -41,12 +43,7 @@ Ota::~Ota() {
 }
 
 std::string Ota::GetCheckVersionUrl() {
-    Settings settings("wifi", false);
-    std::string url = settings.GetString("ota_url");
-    if (url.empty()) {
-        url = CONFIG_OTA_URL;
-    }
-    return url;
+    return "http://192.168.43.5:8003/xiaozhi/ota/";
 }
 
 std::unique_ptr<Http> Ota::SetupHttp() {

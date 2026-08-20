@@ -2,6 +2,7 @@
 #define LCD_DISPLAY_H
 
 #include "lvgl_display.h"
+#include "cute_face_view.h"
 #include "gif/lvgl_gif.h"
 
 #include <esp_lcd_panel_io.h>
@@ -10,9 +11,9 @@
 
 #include <atomic>
 #include <memory>
+#include <cstdint>
 
 #define PREVIEW_IMAGE_DURATION_MS 5000
-
 
 class LcdDisplay : public LvglDisplay {
 protected:
@@ -32,6 +33,9 @@ protected:
     lv_obj_t* chat_message_label_ = nullptr;
     esp_timer_handle_t preview_timer_ = nullptr;
     std::unique_ptr<LvglImage> preview_image_cached_ = nullptr;
+#if CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI
+    std::unique_ptr<CuteFaceView> cute_face_view_ = nullptr;
+#endif
 
     void InitializeLcdThemes();
     void SetupUI();
@@ -45,11 +49,26 @@ protected:
 public:
     ~LcdDisplay();
     virtual void SetEmotion(const char* emotion) override;
-    virtual void SetChatMessage(const char* role, const char* content) override; 
+    virtual void UpdateEmotion(const char* emotion, uint32_t now_ms);
+    virtual void SetListening(bool listening) override;
+    virtual void SetSpeaking(bool speaking) override;
+    virtual void SetChatMessage(const char* role, const char* content) override;
     virtual void SetPreviewImage(std::unique_ptr<LvglImage> image) override;
 
     // Add theme switching function
     virtual void SetTheme(Theme* theme) override;
+
+private:
+    void _set_emoji_image(const lv_image_dsc_t* dsc);
+    void _animate_emoji_switch();
+
+    // 防抖:连续N次相同情绪才切换
+    std::string pending_emotion_;
+    std::string current_emotion_;
+    int emotion_stable_count_ = 0;
+    uint32_t last_emotion_ts_ms_ = 0;
+    static constexpr int kEmotionStableThreshold = 2;  // 需连续2次相同才切换
+    static constexpr int kVarietySwitchMs = 3000;      // 同情绪内变体轮换间隔
 };
 
 // SPI LCD显示器
