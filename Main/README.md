@@ -27,27 +27,105 @@ K210 is no longer the visual hardware for this version. Any old K210 notes are l
 
 Earlier tests showed boot instability when using several strapping or conflicted pins. The current safe UART pair is GPIO38/GPIO39.
 
-### 2.2 Servo output
+MaixCam-side script configuration:
 
-| Servo | ESP32-S3 signal pin | Function |
+```python
+UART_DEVICE = "/dev/ttyS0"
+UART_TX_PIN = "A16"
+UART_RX_PIN = "A17"
+UART_BAUD = 115200
+```
+
+ESP32-side UART configuration:
+
+```text
+UART port: UART1
+TX: GPIO39
+RX: GPIO38
+Baud: 115200
+Frame: 8N1
+Protocol: newline-delimited JSON with CRC
+```
+
+### 2.2 Servo output and power
+
+| Servo wire | Connect to | Notes |
 | --- | --- | --- |
-| Pan / XOY rotation | GPIO41 | Horizontal face tracking |
-| Tilt / XOZ rotation | GPIO18 | Vertical face tracking support |
+| Pan servo signal | ESP32-S3 GPIO41 | Horizontal XOY face tracking |
+| Tilt servo signal | ESP32-S3 GPIO18 | Vertical XOZ face tracking |
+| Servo VCC | External 5 V power positive | Recommended for SG90 stability |
+| Servo GND | External power GND and ESP32 GND | Common ground is required |
 
 Servo power should be supplied from an external 5 V source when possible. ESP32 GND and servo power GND must be connected together. Avoid powering multiple SG90 servos directly from the ESP32 3.3 V pin.
 
-### 2.3 Board-level pin notes
+Current servo PWM parameters:
+
+```text
+Frequency: 50 Hz
+Pulse width range: 500-2500 us
+Angle clamp: 20-160 degrees
+Initial angle: 90 degrees
+```
+
+### 2.3 ST7789 display wiring
+
+| Display signal | ESP32-S3 pin | Notes |
+| --- | --- | --- |
+| SDA / DIN / MOSI | GPIO11 | SPI data |
+| SCL / SCK | GPIO12 | SPI clock |
+| DC | GPIO13 | Data/command |
+| RST | GPIO14 | Reset |
+| CS | GPIO21 | Chip select |
+| BL | GPIO2 | Backlight |
+| VCC | 3.3 V | Use the display module's required logic voltage |
+| GND | GND | Common ground |
+
+Display parameters:
+
+```text
+Resolution: 240 x 240
+SPI mode: 0
+Invert color: true
+RGB order: RGB
+```
+
+### 2.4 Audio wiring
+
+| Audio module signal | ESP32-S3 pin | Purpose |
+| --- | --- | --- |
+| Microphone WS | GPIO4 | I2S microphone word select |
+| Microphone SCK | GPIO5 | I2S microphone clock |
+| Microphone DIN | GPIO6 | I2S microphone data input |
+| Speaker DOUT | GPIO7 | I2S speaker data output |
+| Speaker BCLK | GPIO15 | I2S speaker bit clock |
+| Speaker LRCK | GPIO16 | I2S speaker left/right clock |
+
+### 2.5 Buttons, LED, and auxiliary output
 
 | Function | Pin |
 | --- | --- |
-| I2S microphone WS/SCK/DIN | GPIO4 / GPIO5 / GPIO6 |
-| I2S speaker DOUT/BCLK/LRCK | GPIO7 / GPIO15 / GPIO16 |
-| Display MOSI/SCLK/DC/RST/CS/BL | GPIO11 / GPIO12 / GPIO13 / GPIO14 / GPIO21 / GPIO2 |
+| Boot button | GPIO0 |
+| Touch button | GPIO47 |
 | Volume up button | GPIO40 |
 | Volume down button | GPIO17 |
 | Built-in LED | GPIO48 |
+| Lamp output | GPIO10 |
 
 GPIO40 is reserved for volume-up input in the current board profile and should not be reused for a servo signal.
+
+### 2.6 Pins to avoid reusing
+
+| Pin or group | Reason |
+| --- | --- |
+| GPIO0 | Boot mode strap/button |
+| GPIO4 / GPIO5 / GPIO6 | Microphone I2S |
+| GPIO7 / GPIO15 / GPIO16 | Speaker I2S |
+| GPIO11 / GPIO12 / GPIO13 / GPIO14 / GPIO21 / GPIO2 | ST7789 display |
+| GPIO17 | Volume down button |
+| GPIO38 / GPIO39 | MaixCam Pro UART |
+| GPIO40 | Volume up button |
+| GPIO41 / GPIO18 | SG90 servo outputs |
+| GPIO48 | Built-in LED |
 
 ## 3. Runtime data flow
 

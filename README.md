@@ -31,6 +31,36 @@ MaixCam Pro
               └─ sievox.cn/resona dashboard
 ```
 
+## Current wiring quick reference
+
+The table below records the current physical wiring used by the working prototype.
+
+### MaixCam Pro to ESP32-S3 vision UART
+
+| MaixCam Pro | ESP32-S3 | Purpose | Notes |
+| --- | --- | --- | --- |
+| A16 / TX | GPIO38 / UART1 RX | Vision JSON input to ESP32 | Add a series resistor; 5 kΩ was tested as stable. |
+| A17 / RX | GPIO39 / UART1 TX | ESP32 command/debug output to MaixCam | Optional for one-way vision input, kept in the current wiring. |
+| GND | GND | Common reference ground | Required. |
+
+UART parameters: 115200 baud, 8N1, newline-delimited JSON.
+
+### ESP32-S3 connected modules
+
+| Module | ESP32-S3 pin(s) | Purpose |
+| --- | --- | --- |
+| SG90 pan servo signal | GPIO41 | Horizontal XOY face tracking |
+| SG90 tilt servo signal | GPIO18 | Vertical XOZ face tracking |
+| ST7789 display | MOSI GPIO11, SCLK GPIO12, DC GPIO13, RST GPIO14, CS GPIO21, BL GPIO2 | Local status and Q-style face display |
+| I2S microphone | WS GPIO4, SCK GPIO5, DIN GPIO6 | Voice input |
+| I2S speaker | DOUT GPIO7, BCLK GPIO15, LRCK GPIO16 | Voice output |
+| Volume up button | GPIO40 | Reserved; do not reuse for servo |
+| Volume down button | GPIO17 | Reserved |
+| Built-in LED | GPIO48 | Local indicator |
+| Lamp output | GPIO10 | Auxiliary lamp/output |
+
+Servo power note: use an external 5 V supply for SG90 servos when possible. Connect servo GND, ESP32 GND, and MaixCam GND together. Do not power multiple SG90 servos directly from the ESP32 3.3 V pin.
+
 ## Repository layout
 
 ```text
