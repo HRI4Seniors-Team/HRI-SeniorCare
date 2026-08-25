@@ -33,33 +33,24 @@ MaixCam Pro
 
 ## Current wiring quick reference
 
-The table below records the current physical wiring used by the working prototype.
+This is the target ESP32-S3-side wiring for the new hardware revision.
 
-### MaixCam Pro to ESP32-S3 vision UART
-
-| MaixCam Pro | ESP32-S3 | Purpose | Notes |
-| --- | --- | --- | --- |
-| A16 / TX | GPIO38 / UART1 RX | Vision JSON input to ESP32 | Add a series resistor; 5 kΩ was tested as stable. |
-| A17 / RX | GPIO39 / UART1 TX | ESP32 command/debug output to MaixCam | Optional for one-way vision input, kept in the current wiring. |
-| GND | GND | Common reference ground | Required. |
-
-UART parameters: 115200 baud, 8N1, newline-delimited JSON.
-
-### ESP32-S3 connected modules
-
-| Module | ESP32-S3 pin(s) | Purpose |
+| Module | Pin mapping | Notes |
 | --- | --- | --- |
-| SG90 pan servo signal | GPIO41 | Horizontal XOY face tracking |
-| SG90 tilt servo signal | GPIO18 | Vertical XOZ face tracking |
-| ST7789 display | MOSI GPIO11, SCLK GPIO12, DC GPIO13, RST GPIO14, CS GPIO21, BL GPIO2 | Local status and Q-style face display |
-| I2S microphone | WS GPIO4, SCK GPIO5, DIN GPIO6 | Voice input |
-| I2S speaker | DOUT GPIO7, BCLK GPIO15, LRCK GPIO16 | Voice output |
-| Volume up button | GPIO40 | Reserved; do not reuse for servo |
-| Volume down button | GPIO17 | Reserved |
-| Built-in LED | GPIO48 | Local indicator |
-| Lamp output | GPIO10 | Auxiliary lamp/output |
+| OLED | SDA → GPIO41, SCL → GPIO42, VCC → 3.3 V, GND → GND | I2C OLED. |
+| INMP441 | SCK → GPIO5, WS → GPIO4, SD → GPIO6, VDD → 3.3 V, GND → GND | Digital microphone input. |
+| MAX98357A | DIN → GPIO7, BCLK → GPIO15, LRC/WS → GPIO16, VIN → 5 V, GND → GND | I2S speaker output. |
+| SG90 pan servo | Signal → GPIO1, VCC → 5 V, GND → GND | Horizontal axis. |
+| SG90 tilt servo | Signal → GPIO2, VCC → 5 V, GND → GND | Vertical axis. |
+| Buttons | Volume+ → GPIO40, Volume- → GPIO39, BOOT → GPIO0, Custom → GPIO47 | BOOT is a strap pin. |
 
-Servo power note: use an external 5 V supply for SG90 servos when possible. Connect servo GND, ESP32 GND, and MaixCam GND together. Do not power multiple SG90 servos directly from the ESP32 3.3 V pin.
+Important conflicts:
+
+- GPIO0 is a strapping pin; keep it only for BOOT.
+- GPIO39 is now occupied by Volume-; the old GPIO38/39 UART pair cannot stay as-is.
+- GPIO41/42 are now consumed by the OLED.
+- GPIO1/2 are now used by servo signals; verify boot stability on the target board before final wiring.
+- Servo power should come from a separate 5 V rail with common ground to the ESP32.
 
 ## Repository layout
 
