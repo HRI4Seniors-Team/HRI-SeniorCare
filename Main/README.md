@@ -16,16 +16,23 @@ K210 is no longer the visual hardware for this version. Any old K210 notes are l
 
 ## 2. Current wiring
 
-This section is the migration target for the new hardware revision.
+This section is the migration target for the revised hardware with the previous screen restored.
 
 ### 2.1 Wiring table
 
 | Module | Signal | ESP32-S3 pin | Notes |
 | --- | --- | --- | --- |
-| OLED | SDA | GPIO41 | I2C data |
-| OLED | SCL | GPIO42 | I2C clock |
-| OLED | VCC | 3.3 V | Logic power |
-| OLED | GND | GND | Common ground |
+| Vision UART | MaixCam TX | GPIO38 | Vision JSON input |
+| Vision UART | MaixCam RX | GPIO39 | ESP32 command/debug output |
+| Vision UART | GND | GND | Common ground |
+| ST7789 screen | MOSI | GPIO11 | SPI data |
+| ST7789 screen | SCLK | GPIO12 | SPI clock |
+| ST7789 screen | DC | GPIO13 | Data/command |
+| ST7789 screen | RST | GPIO14 | Reset |
+| ST7789 screen | CS | GPIO21 | Chip select |
+| ST7789 screen | BL | GPIO2 | Backlight |
+| ST7789 screen | VCC | 3.3 V | Logic power |
+| ST7789 screen | GND | GND | Common ground |
 | INMP441 | SCK | GPIO5 | I2S clock |
 | INMP441 | WS | GPIO4 | I2S word select |
 | INMP441 | SD | GPIO6 | I2S data |
@@ -36,25 +43,25 @@ This section is the migration target for the new hardware revision.
 | MAX98357A | LRC/WS | GPIO16 | I2S word select |
 | MAX98357A | VIN | 5 V | Power input |
 | MAX98357A | GND | GND | Common ground |
-| SG90 pan servo | Signal | GPIO1 | Horizontal axis |
+| SG90 pan servo | Signal | GPIO41 | Horizontal axis |
 | SG90 pan servo | VCC | 5 V | External supply recommended |
 | SG90 pan servo | GND | GND | Common ground |
-| SG90 tilt servo | Signal | GPIO2 | Vertical axis |
+| SG90 tilt servo | Signal | GPIO18 | Vertical axis |
 | SG90 tilt servo | VCC | 5 V | External supply recommended |
 | SG90 tilt servo | GND | GND | Common ground |
 | Buttons | Volume+ | GPIO40 | Button input |
-| Buttons | Volume- | GPIO39 | Button input |
+| Buttons | Volume- | GPIO17 | Button input |
 | Buttons | BOOT | GPIO0 | Strapping pin |
 | Buttons | Custom | GPIO47 | User-defined input |
 
 ### 2.2 Practical notes
 
 - GPIO0 is a strapping pin. Keep it only for BOOT and avoid adding extra load.
-- GPIO39 is now occupied by Volume-. The previous MaixCam UART TX/RX pair on GPIO38/GPIO39 cannot stay unchanged if Volume- remains there.
-- GPIO41/42 are consumed by the OLED, so they are no longer available for other I2C or servo use.
-- GPIO1/2 are used for servos in this revision. Verify boot behavior on the actual board before finalizing the harness.
+- GPIO38/39 are reserved for the MaixCam vision UART pair.
+- GPIO2 is consumed by the screen backlight.
+- GPIO41/18 are used by the servo signals in this revision.
 - Servos and MAX98357A must use a separate 5 V supply, with all grounds tied together at a single common ground.
-- This wiring table is the migration target; if you still keep a MaixCam vision node, it needs a new UART pair.
+- This wiring table is the migration target for the previous screen hardware. Keep the MaixCam vision node on GPIO38/39.
 
 ## 3. Runtime data flow
 

@@ -33,23 +33,25 @@ MaixCam Pro
 
 ## Current wiring quick reference
 
-This is the target ESP32-S3-side wiring for the new hardware revision.
+This is the target ESP32-S3-side wiring for the revised hardware with the previous screen restored.
 
 | Module | Pin mapping | Notes |
 | --- | --- | --- |
-| OLED | SDA → GPIO41, SCL → GPIO42, VCC → 3.3 V, GND → GND | I2C OLED. |
+| Vision UART | MaixCam TX → GPIO38, MaixCam RX ← GPIO39, GND → GND | 115200, 8N1. |
+| ST7789 screen | MOSI → GPIO11, SCLK → GPIO12, DC → GPIO13, RST → GPIO14, CS → GPIO21, BL → GPIO2, VCC → 3.3 V, GND → GND | Previous screen restored. |
 | INMP441 | SCK → GPIO5, WS → GPIO4, SD → GPIO6, VDD → 3.3 V, GND → GND | Digital microphone input. |
 | MAX98357A | DIN → GPIO7, BCLK → GPIO15, LRC/WS → GPIO16, VIN → 5 V, GND → GND | I2S speaker output. |
-| SG90 pan servo | Signal → GPIO1, VCC → 5 V, GND → GND | Horizontal axis. |
-| SG90 tilt servo | Signal → GPIO2, VCC → 5 V, GND → GND | Vertical axis. |
-| Buttons | Volume+ → GPIO40, Volume- → GPIO39, BOOT → GPIO0, Custom → GPIO47 | BOOT is a strap pin. |
+| SG90 pan servo | Signal → GPIO41, VCC → 5 V, GND → GND | Horizontal axis. |
+| SG90 tilt servo | Signal → GPIO18, VCC → 5 V, GND → GND | Vertical axis. |
+| Buttons | Volume+ → GPIO40, Volume- → GPIO17, BOOT → GPIO0, Custom → GPIO47 | BOOT is a strap pin. |
+| Lamp | GPIO10 | Optional auxiliary output. |
 
 Important conflicts:
 
 - GPIO0 is a strapping pin; keep it only for BOOT.
-- GPIO39 is now occupied by Volume-; the old GPIO38/39 UART pair cannot stay as-is.
-- GPIO41/42 are now consumed by the OLED.
-- GPIO1/2 are now used by servo signals; verify boot stability on the target board before final wiring.
+- GPIO38/39 are reserved for the vision UART pair.
+- GPIO2 is used by the screen backlight.
+- GPIO41/18 are used by servo signals.
 - Servo power should come from a separate 5 V rail with common ground to the ESP32.
 
 ## Repository layout
