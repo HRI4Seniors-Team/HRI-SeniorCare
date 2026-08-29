@@ -16,7 +16,7 @@
 
 #include <cstring>
 #undef CONFIG_OTA_URL
-#define CONFIG_OTA_URL "http://192.168.43.5:8003/xiaozhi/ota/"
+#define CONFIG_OTA_URL "https://api.tenclass.net/xiaozhi/ota/"
 #include <vector>
 #include <sstream>
 #include <algorithm>
@@ -43,7 +43,7 @@ Ota::~Ota() {
 }
 
 std::string Ota::GetCheckVersionUrl() {
-    return "http://192.168.43.5:8003/xiaozhi/ota/";
+    return CONFIG_OTA_URL;
 }
 
 std::unique_ptr<Http> Ota::SetupHttp() {
