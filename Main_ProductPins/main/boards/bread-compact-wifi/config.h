@@ -1,0 +1,66 @@
+#ifndef _BOARD_CONFIG_H_
+#define _BOARD_CONFIG_H_
+
+#include <driver/gpio.h>
+
+#define AUDIO_INPUT_SAMPLE_RATE  16000
+#define AUDIO_OUTPUT_SAMPLE_RATE 24000
+
+// 如果使用 Duplex I2S 模式，请注释下面一行
+#define AUDIO_I2S_METHOD_SIMPLEX
+
+#ifdef AUDIO_I2S_METHOD_SIMPLEX
+
+#define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_4
+#define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_5
+#define AUDIO_I2S_MIC_GPIO_DIN  GPIO_NUM_6
+#define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_7
+#define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_15
+#define AUDIO_I2S_SPK_GPIO_LRCK GPIO_NUM_16
+
+#else
+
+#define AUDIO_I2S_GPIO_WS GPIO_NUM_4
+#define AUDIO_I2S_GPIO_BCLK GPIO_NUM_5
+#define AUDIO_I2S_GPIO_DIN  GPIO_NUM_6
+#define AUDIO_I2S_GPIO_DOUT GPIO_NUM_7
+
+#endif
+
+
+#define BUILTIN_LED_GPIO        GPIO_NUM_48
+#define BOOT_BUTTON_GPIO        GPIO_NUM_0
+#define TOUCH_BUTTON_GPIO       GPIO_NUM_47
+#define VOLUME_UP_BUTTON_GPIO   GPIO_NUM_40
+#define VOLUME_DOWN_BUTTON_GPIO GPIO_NUM_39
+
+// ── Display: 1.54" TFT, SPI, ST7789 (240x240) ──────────────────────
+// 原 I²C SSD1306 已换成 SPI ST7789。以下 6 个引脚均为无冲突空闲 GPIO,
+// 避开音频(4-7/15-16)、视觉UART RX(38)、双舵机(1-2)、
+// 按键(0/39/40/47)、LED(48)和灯(10)。
+#define DISPLAY_MOSI_PIN      GPIO_NUM_11   // 屏 SDA/DIN
+#define DISPLAY_CLK_PIN       GPIO_NUM_12   // 屏 SCL/SCK
+#define DISPLAY_DC_PIN        GPIO_NUM_13   // 数据/命令
+#define DISPLAY_RST_PIN       GPIO_NUM_14   // 复位
+#define DISPLAY_CS_PIN        GPIO_NUM_21   // 片选
+#define DISPLAY_BACKLIGHT_PIN GPIO_NUM_42   // 背光 BL；GPIO2留给俯仰舵机
+
+#define LCD_TYPE_ST7789_SERIAL
+#define DISPLAY_WIDTH   240
+#define DISPLAY_HEIGHT  240
+#define DISPLAY_MIRROR_X false
+#define DISPLAY_MIRROR_Y false
+#define DISPLAY_SWAP_XY false
+#define DISPLAY_INVERT_COLOR true
+#define DISPLAY_RGB_ORDER  LCD_RGB_ELEMENT_ORDER_RGB
+#define DISPLAY_OFFSET_X  0
+#define DISPLAY_OFFSET_Y  0
+#define DISPLAY_BACKLIGHT_OUTPUT_INVERT false
+#define DISPLAY_SPI_MODE 0
+
+
+// A MCP Test: Control a lamp
+// #define LAMP_GPIO GPIO_NUM_18
+#define LAMP_GPIO GPIO_NUM_10
+
+#endif // _BOARD_CONFIG_H_

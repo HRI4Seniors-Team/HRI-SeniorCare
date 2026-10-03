@@ -1,0 +1,17 @@
+{
+        "init_pitch": 50,
+        "init_roll": 50,
+
+        "pitch_pid": [0.5, 0.02, 0.03, 5],
+        "roll_pid": [0.5, 0.02, 0.03, 10],
+
+        "audio_range": 10,
+        "ignore_threshold": 0.1,
+
+        "lcd_rotation": 0,
+        "pitch_scale": 1.8,
+        "roll_scale": 1.8,
+        
+        "main_timeout": 120,
+        "loop_delay": 0.05
+}
